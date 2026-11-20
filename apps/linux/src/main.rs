@@ -319,22 +319,39 @@ fn range_checks(url: &str, headers: &[(String, String)]) -> Vec<String> {
         .and_then(|v| v.parse().ok());
 
     let mut shapes = vec![
-        ("first 2 bytes", Some("bytes=0-1".to_owned())),
-        ("first 64 KB", Some("bytes=0-65535".to_owned())),
+        ("first 2 bytes".to_owned(), Some("bytes=0-1".to_owned())),
+        ("first 64 KB".to_owned(), Some("bytes=0-65535".to_owned())),
     ];
+    // Find the largest range the server accepts.
+    for kb in [128u64, 256, 512, 1024] {
+        if size.is_none_or(|size| kb * 1024 < size) {
+            let label = if kb < 1024 {
+                format!("first {kb} KB")
+            } else {
+                "first 1 MB".into()
+            };
+            shapes.push((label, Some(format!("bytes=0-{}", kb * 1024 - 1))));
+        }
+    }
     if let Some(size) = size {
-        shapes.push(("whole file, exact", Some(format!("bytes=0-{}", size - 1))));
         shapes.push((
-            "past the end",
+            "whole file, exact".to_owned(),
+            Some(format!("bytes=0-{}", size - 1)),
+        ));
+        shapes.push((
+            "past the end".to_owned(),
             Some(format!("bytes=0-{}", size + 1_000_000)),
         ));
         shapes.push((
-            "from the middle",
+            "from the middle".to_owned(),
             Some(format!("bytes={}-{}", size / 2, size / 2 + 65535)),
         ));
     }
-    shapes.push(("open-ended (bytes=0-)", Some("bytes=0-".to_owned())));
-    shapes.push(("no Range header", None));
+    shapes.push((
+        "open-ended (bytes=0-)".to_owned(),
+        Some("bytes=0-".to_owned()),
+    ));
+    shapes.push(("no Range header".to_owned(), None));
 
     let mut lines = vec![match size {
         Some(size) => format!("file size {size} bytes"),

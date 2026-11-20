@@ -12,6 +12,10 @@ const CHUNK_SIZE: u64 = 4 * 1024 * 1024;
 /// some servers, including YouTube's, refuse).
 const FIRST_CHUNK_SIZE: u64 = 256 * 1024;
 
+/// The smallest range the reader falls back to when a server refuses
+/// larger ones.
+const MIN_CHUNK_SIZE: u64 = 16 * 1024;
+
 /// Forward seeks up to this distance read through the open connection instead
 /// of starting a new request.
 const SKIP_THRESHOLD: u64 = 256 * 1024;
@@ -77,26 +81,41 @@ impl HttpReader {
 
     /// Request the next chunk, starting at the current position.
     fn connect(&mut self) -> io::Result<()> {
-        let last = match self.len {
-            Some(len) => (self.pos + self.chunk_size - 1).min(len.saturating_sub(1)),
-            None => self.pos + self.chunk_size.min(FIRST_CHUNK_SIZE) - 1,
-        };
-        let mut request = agent()
-            .get(&self.url)
-            .header("Range", format!("bytes={}-{last}", self.pos));
-        for (name, value) in &self.headers {
-            request = request.header(name.as_str(), value.as_str());
-        }
-
-        let response = match request.call() {
-            Ok(response) => response,
-            // Asking for a range that starts at the end: nothing left to read.
-            Err(ureq::Error::StatusCode(416)) => {
-                *self.body.get_mut().unwrap() = Some(Box::new(io::empty()));
-                self.chunk_end = u64::MAX;
-                return Ok(());
+        let response = loop {
+            let size = match self.len {
+                Some(_) => self.chunk_size,
+                None => self.chunk_size.min(FIRST_CHUNK_SIZE),
+            };
+            let mut last = self.pos + size - 1;
+            if let Some(len) = self.len {
+                last = last.min(len.saturating_sub(1));
             }
-            Err(e) => return Err(io::Error::other(e)),
+            let mut request = agent()
+                .get(&self.url)
+                .header("Range", format!("bytes={}-{last}", self.pos));
+            for (name, value) in &self.headers {
+                request = request.header(name.as_str(), value.as_str());
+            }
+
+            match request.call() {
+                Ok(response) => break response,
+                // Asking for a range that starts at the end: nothing left.
+                Err(ureq::Error::StatusCode(416)) => {
+                    *self.body.get_mut().unwrap() = Some(Box::new(io::empty()));
+                    self.chunk_end = u64::MAX;
+                    return Ok(());
+                }
+                // Some servers (YouTube) refuse ranges above a size limit:
+                // halve the size and try again, keeping what works.
+                Err(ureq::Error::StatusCode(403)) if size > MIN_CHUNK_SIZE => {
+                    self.chunk_size = (size / 2).max(MIN_CHUNK_SIZE);
+                    log::debug!(
+                        "server refused a {size}-byte range; trying {} bytes",
+                        self.chunk_size
+                    );
+                }
+                Err(e) => return Err(io::Error::other(e)),
+            }
         };
 
         let headers = response.headers();
@@ -245,6 +264,11 @@ mod tests {
 
     /// A tiny HTTP server serving `data`, with or without range support.
     fn serve(data: Vec<u8>, ranges: bool) -> String {
+        serve_with_limit(data, ranges, usize::MAX)
+    }
+
+    /// `max_range`: larger ranges are refused, like YouTube does.
+    fn serve_with_limit(data: Vec<u8>, ranges: bool, max_range: usize) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         thread::spawn(move || {
@@ -265,7 +289,7 @@ mod tests {
                         let last = last.parse::<usize>().ok();
                         // Like YouTube: refuse open-ended ranges and ranges
                         // past the end of the file.
-                        refuse = last.is_none_or(|l| l >= data.len());
+                        refuse = last.is_none_or(|l| l >= data.len() || l + 1 - start > max_range);
                         end = last.map_or(data.len(), |l| (l + 1).min(data.len()));
                     }
                 }
@@ -327,6 +351,18 @@ mod tests {
         let data = data();
         let mut reader =
             HttpReader::open_with_chunk_size(&serve(data.clone(), true), &[], 7_919).unwrap();
+        let mut all = Vec::new();
+        reader.read_to_end(&mut all).unwrap();
+        assert_eq!(all, data);
+        check_seeks(&mut reader, &data);
+    }
+
+    #[test]
+    fn shrinks_chunks_when_large_ranges_are_refused() {
+        let data = data();
+        let url = serve_with_limit(data.clone(), true, 50_000);
+        let mut reader = HttpReader::open(&url, &[]).unwrap();
+        assert!(reader.chunk_size <= 50_000, "{}", reader.chunk_size);
         let mut all = Vec::new();
         reader.read_to_end(&mut all).unwrap();
         assert_eq!(all, data);
