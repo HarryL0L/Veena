@@ -177,6 +177,13 @@ Planned: `apps/android` (Compose via UniFFI), a Slint desktop app and the plugin
 
 ---
 
+## Security
+
+Dependencies are checked for known vulnerabilities on every change and every week, and updates arrive as automatic pull requests.
+See [SECURITY.md](SECURITY.md) to report a problem.
+
+---
+
 ## Note
 
 Veena is an independent project, not affiliated with YouTube or Google.

@@ -1,0 +1,58 @@
+# Dependency policy, checked with `cargo deny check`.
+# Runs in CI on every change and weekly, so new advisories are caught
+# even when the code does not change.
+
+[graph]
+# Check the platforms Veena ships on.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+]
+all-features = true
+
+# Known vulnerabilities, unmaintained and yanked crates (RustSec database).
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "workspace"
+# Every exception needs a reason and should be revisited.
+ignore = []
+
+# Licenses must be permissive so Veena stays free to choose its own.
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "0BSD",
+    # File-level copyleft, used by the symphonia audio decoders. Fine for
+    # unmodified use under any app license.
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[licenses.private]
+# Veena's own crates are not published.
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+# Only crates.io; no git dependencies from unknown places.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

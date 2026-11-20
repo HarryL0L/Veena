@@ -3,6 +3,7 @@ name = "veena-net"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 ureq = "3.5.2"

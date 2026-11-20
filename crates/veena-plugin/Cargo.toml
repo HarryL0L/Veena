@@ -3,6 +3,7 @@ name = "veena-plugin"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 veena-core = { path = "../veena-core" }
