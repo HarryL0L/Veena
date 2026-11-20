@@ -108,6 +108,11 @@ pub fn install(context: &mut Context, config: &serde_json::Map<String, Value>) -
         .property(js_string!("cache"), cache, Attribute::READONLY)
         .property(js_string!("config"), config, Attribute::READONLY)
         .function(NativeFunction::from_fn_ptr(log), js_string!("__log"), 2)
+        .function(
+            NativeFunction::from_fn_ptr(attempt),
+            js_string!("attempt"),
+            1,
+        )
         .build();
     context.register_global_property(js_string!("veena"), veena, Attribute::READONLY)?;
     context.eval(Source::from_bytes(PRELUDE))?;
@@ -135,6 +140,41 @@ fn log(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue
     };
     log::log!(target: "veena_plugin", level, "[{plugin}] {message}");
     Ok(JsValue::undefined())
+}
+
+/// `veena.attempt(fn, ...args)`: call `fn` and report the outcome as
+/// `{ ok, value }` or `{ ok: false, error }`.
+///
+/// Unlike `try`/`catch`, this also reports the engine's own limits (loops,
+/// recursion), which JavaScript cannot catch. Bricks use it to call code
+/// they do not control, such as functions found in downloaded scripts.
+fn attempt(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let Some(function) = args.first().and_then(JsValue::as_callable) else {
+        return Err(JsNativeError::typ()
+            .with_message("veena.attempt needs a function")
+            .into());
+    };
+    let rest = args.get(1..).unwrap_or_default();
+    let (ok, value, error) = match function.call(&JsValue::undefined(), rest, context) {
+        Ok(value) => (true, value, JsValue::undefined()),
+        Err(e) => {
+            let message: String = e
+                .to_string()
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect();
+            (false, JsValue::undefined(), js_string!(message).into())
+        }
+    };
+    Ok(ObjectInitializer::new(context)
+        .property(js_string!("ok"), ok, Attribute::all())
+        .property(js_string!("value"), value, Attribute::all())
+        .property(js_string!("error"), error, Attribute::all())
+        .build()
+        .into())
 }
 
 fn cache_get(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {

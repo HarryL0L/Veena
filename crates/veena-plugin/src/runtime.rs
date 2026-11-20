@@ -183,7 +183,11 @@ fn settle(promise: &JsPromise, context: &mut Context) -> Result<JsValue, String>
     match promise.state() {
         PromiseState::Fulfilled(value) => Ok(value),
         PromiseState::Rejected(reason) => Err(concise(&describe(&reason, context))),
-        PromiseState::Pending => Err("promise never settled".into()),
+        PromiseState::Pending => Err(
+            "promise never settled (an engine limit such as the loop or recursion limit may have \
+             stopped it; call untrusted code through veena.attempt)"
+                .into(),
+        ),
     }
 }
 

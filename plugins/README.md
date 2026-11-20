@@ -96,6 +96,7 @@ At least one of `search` and `resolve` is required. Functions may be `async` or 
 | `veena.cache.set(key, value, ttlSeconds?)` | Store a string, optionally expiring. |
 | `veena.cache.delete(key)` | Remove a cached value. |
 | `veena.config` | Read-only settings delivered with the plugin. |
+| `veena.attempt(fn, ...args)` | Call code you don't control. Returns `{ ok, value }` or `{ ok: false, error }`, including for loop and recursion limits, which `try`/`catch` cannot catch. |
 | `veena.log(...)`, `console.log(...)` | Write to Veena's log. |
 | `veena.apiVersion` | Host API version (`1`). |
 

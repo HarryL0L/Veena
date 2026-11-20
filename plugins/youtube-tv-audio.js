@@ -12,7 +12,7 @@
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "0.2.0",
+  version: "0.3.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -140,26 +140,29 @@ async function getPlayer() {
   veena.log(`player ${id}: ran in ${Date.now() - started} ms`);
 
   const candidates = findFunctions(code);
+  const sites = callSites(code);
   veena.log(
     `player ${id}: ${candidates.all.length} one-argument functions; ` +
-      `${candidates.signature.length} look like signature and ${candidates.n.length} like n functions`,
+      `${sites.signature.length} signature and ${sites.n.length} n call sites; ` +
+      `${candidates.signature.length} signature-shaped and ${candidates.n.length} n-shaped functions`,
   );
-  let signature = pick("signature", candidates.signature, lookup, isSignatureFunction);
-  let n = pick("n", candidates.n, lookup, isNFunction);
+  const byName = (names) => names.map((name) => ({ label: name, expr: name }));
+  let signature = pick("signature", [...sites.signature, ...byName(candidates.signature)], lookup, isSignatureFunction, 6000);
+  let n = pick("n", [...sites.n, ...byName(candidates.n)], lookup, isNFunction, 8000);
   // Fallback: test every function of a plausible size, within a time limit.
   if (!signature) {
     const small = candidates.all.filter((c) => c.length < 2500).map((c) => c.name);
-    signature = pick("signature (scan)", small, lookup, isSignatureFunction, 8000);
+    signature = pick("signature (scan)", byName(small), lookup, isSignatureFunction, 4000);
   }
   if (!n) {
     const large = candidates.all.filter((c) => c.length > 1000).map((c) => c.name);
-    n = pick("n (scan)", large, lookup, isNFunction, 8000);
+    n = pick("n (scan)", byName(large), lookup, isNFunction, 4000);
   }
-  veena.log(`player ${id}: chose ${signature?.name ?? "none"} and ${n?.name ?? "none"}`);
+  veena.log(`player ${id}: chose ${signature?.label ?? "none"} and ${n?.label ?? "none"}`);
   if (!signature) throw new Error(`player ${id}: signature function not found`);
   if (!n) throw new Error(`player ${id}: n function not found`);
 
-  player = { id, signatureTimestamp: Number(sts[1]), signature: signature.fn, n: wrapN(n.fn) };
+  player = { id, signatureTimestamp: Number(sts[1]), signature: wrapSignature(signature.fn), n: wrapN(n.fn) };
   return player;
 }
 
@@ -221,6 +224,8 @@ function installBrowserStandIns() {
     document: anything(),
     navigator: { userAgent: CLIENT.userAgent, language: "en", platform: "" },
     location,
+    // The engine is built without Intl; the player only formats with it.
+    Intl: anything(),
     localStorage: anything(),
     sessionStorage: anything(),
     XMLHttpRequest: anything(),
@@ -237,6 +242,29 @@ function installBrowserStandIns() {
   }
   if (!("window" in globalThis)) globalThis.window = globalThis;
   if (!("self" in globalThis)) globalThis.self = globalThis;
+}
+
+/**
+ * Where the player applies its functions. The signature function is called
+ * on `decodeURIComponent(...)` of the scrambled signature, sometimes with
+ * extra arguments first: `F(3,decodeURIComponent(s))`. The n function
+ * replaces a value with a function of itself: `b=F(b)` or `b=G[0](b)`.
+ * Each site becomes an expression for a one-argument wrapper.
+ */
+function callSites(code) {
+  const unique = (items) => [...new Map(items.map((i) => [i.expr, i])).values()];
+  const signature = [];
+  for (const m of code.matchAll(/([A-Za-z_$][\w$]*(?:\[\d+\])?)\(((?:[\w$.]+,){0,3})decodeURIComponent\(/g)) {
+    if (m[1] === "decodeURIComponent" || m[1] === "encodeURIComponent") continue;
+    signature.push({ label: `${m[1]}(${m[2]}…)`, expr: `(function(s){return ${m[1]}(${m[2]}s)})` });
+  }
+  const n = [];
+  for (const m of code.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*(?:\[\d+\])?)\(((?:[\w$]+,){0,2})\1\)/g)) {
+    n.push({ label: `${m[2]}(${m[3]}…)`, expr: `(function(s){return ${m[2]}(${m[3]}s)})` });
+  }
+  // Recent players reach the n function through a list: try those first.
+  n.sort((a, b) => Number(b.label.includes("[")) - Number(a.label.includes("[")));
+  return { signature: unique(signature), n: unique(n) };
 }
 
 /**
@@ -291,41 +319,51 @@ function bodyAt(code, open, max) {
 }
 
 /**
- * The first candidate that behaves as `test` expects. Logs why the first
- * few candidates were rejected, to help when YouTube changes its code.
+ * The first candidate that behaves as `test` expects. Candidates are
+ * `{ label, expr }`, where `expr` is evaluated inside the player's scope.
+ * Logs why the first few were rejected, to help when YouTube changes.
  */
-function pick(kind, names, lookup, test, timeLimitMs = Infinity) {
+function pick(kind, candidates, lookup, test, timeLimitMs) {
   const started = Date.now();
   const rejections = [];
   let tested = 0;
-  for (const name of names) {
+  for (const candidate of candidates) {
     if (Date.now() - started > timeLimitMs) {
-      veena.log(`${kind}: stopped after ${tested} of ${names.length} (time limit)`);
+      veena.log(`${kind}: stopped after ${tested} of ${candidates.length} (time limit)`);
       break;
     }
     tested++;
     let reason;
-    try {
-      const fn = lookup(name);
-      if (typeof fn !== "function") {
-        reason = `not a function (${typeof fn})`;
-      } else {
-        const verdict = test(fn);
+    const found = veena.attempt(lookup, candidate.expr);
+    if (!found.ok) {
+      reason = `lookup failed: ${found.error.slice(0, 60)}`;
+    } else if (typeof found.value !== "function") {
+      reason = `not a function (${typeof found.value})`;
+    } else {
+      try {
+        const verdict = test(found.value);
         if (verdict === true) {
-          veena.log(`${kind}: ${name} matches (tested ${tested})`);
-          return { name, fn };
+          veena.log(`${kind}: ${candidate.label} matches (tested ${tested})`);
+          return { label: candidate.label, fn: found.value };
         }
         reason = verdict;
+      } catch (e) {
+        reason = `threw ${String(e.message ?? e).slice(0, 60)}`;
       }
-    } catch (e) {
-      reason = `threw ${String(e).slice(0, 80)}`;
     }
-    if (rejections.length < 5) rejections.push(`${name}: ${reason}`);
+    if (rejections.length < 5) rejections.push(`${candidate.label}: ${reason}`);
   }
-  if (names.length > 0 && rejections.length > 0) {
+  if (rejections.length > 0) {
     veena.log(`${kind}: none of ${tested} matched; e.g. ${rejections.join(" | ")}`);
   }
   return undefined;
+}
+
+/** Call code we do not control; engine limits become ordinary errors. */
+function safely(fn, ...args) {
+  const result = veena.attempt(fn, ...args);
+  if (!result.ok) throw new Error(result.error);
+  return result.value;
 }
 
 const SAMPLE_SIGNATURE = "AOq0QJ8wRAIgXmPlOPSBkkUs1bYFYlJCfe29xxLTnR1o6ZK7Vb1m1q4CIGR5Iu0ADBc0bMgDGNIq6GvdhZkTHvXlrrjZOq9Ki7Vf";
@@ -333,31 +371,39 @@ const SAMPLE_N = "a1Bc2De3Fg4Hi5Jk";
 
 /** Shuffles a long string into a slightly shorter one of the same characters. */
 function isSignatureFunction(fn) {
-  const out = fn(SAMPLE_SIGNATURE);
+  const out = safely(fn, SAMPLE_SIGNATURE);
   if (typeof out !== "string") return `returned ${typeof out}`;
   if (out === SAMPLE_SIGNATURE) return "returned its input";
   if (out.length < 80 || out.length > SAMPLE_SIGNATURE.length) return `returned length ${out.length}`;
   const pool = {};
   for (const c of SAMPLE_SIGNATURE) pool[c] = (pool[c] ?? 0) + 1;
   for (const c of out) if (!pool[c]--) return `returned other characters: ${out.slice(0, 20)}`;
-  return fn(SAMPLE_SIGNATURE) === out ? true : "not repeatable";
+  return safely(fn, SAMPLE_SIGNATURE) === out ? true : "not repeatable";
 }
 
 /** Turns a short code into a different short code, the same way each time. */
 function isNFunction(fn) {
-  const out = fn(SAMPLE_N);
+  const out = safely(fn, SAMPLE_N);
   if (typeof out !== "string") return `returned ${typeof out}`;
   if (out === SAMPLE_N) return "returned its input";
   if (out.startsWith("enhanced_except")) return `reported failure: ${out.slice(0, 40)}`;
   if (out.length < 8 || out.length > 40) return `returned length ${out.length}`;
-  return fn(SAMPLE_N) === out ? true : "not repeatable";
+  return safely(fn, SAMPLE_N) === out ? true : "not repeatable";
 }
 
 /** The n function reports failure by returning an error string. */
 function wrapN(fn) {
   return (n) => {
-    const out = fn(n);
+    const out = safely(fn, n);
     if (typeof out !== "string" || out.startsWith("enhanced_except")) throw new Error("n function failed");
+    return out;
+  };
+}
+
+function wrapSignature(fn) {
+  return (s) => {
+    const out = safely(fn, s);
+    if (typeof out !== "string") throw new Error("signature function failed");
     return out;
   };
 }

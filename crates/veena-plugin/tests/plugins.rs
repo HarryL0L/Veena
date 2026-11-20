@@ -87,6 +87,13 @@ export async function playlist(id) {{
   if (id === "config") {{ return [{{ id: veena.config.client, title: String(veena.apiVersion) }}]; }}
   if (id === "throw") throw new TypeError("boom");
   if (id === "loop") {{ while (true) {{}} }}
+  if (id === "attempt") {{
+    const loop = veena.attempt(() => {{ while (true) {{}} }});
+    const deep = veena.attempt(function f(n) {{ return f(n + 1); }}, 0);
+    const fine = veena.attempt((x, y) => x + y, 2, 3);
+    const thrown = veena.attempt(() => {{ throw new Error("nope"); }});
+    return [loop, deep, fine, thrown].map((r, i) => ({{ id: String(i), title: `${{r.ok}}|${{r.value}}|${{r.error}}` }}));
+  }}
   if (id === "recurse") {{ const f = (n) => f(n + 1) + 1; return f(0); }}
   if (id === "deep-json") {{ let v = {{}}; for (let i = 0; i < 150; i++) v = {{ a: [v] }}; const walk = (n) => {{ if (n && typeof n === "object") for (const k in n) walk(n[k]); }}; walk(v); return []; }}
   if (id === "bad-stream") return [{{ id: 1 }}];
@@ -214,6 +221,23 @@ async fn cache_config_and_errors() {
     );
     let fraction = plugin.playlist("fraction").await.unwrap();
     assert_eq!(fraction[0].duration.map(|d| d.as_millis()), Some(1500));
+
+    // veena.attempt reports engine limits that try/catch cannot catch.
+    let attempts = plugin.playlist("attempt").await.unwrap();
+    let results: Vec<&str> = attempts.iter().map(|t| t.title.as_str()).collect();
+    assert!(
+        results[0].starts_with("false|undefined|") && results[0].contains("loop"),
+        "{results:?}"
+    );
+    assert!(
+        results[1].starts_with("false|undefined|") && results[1].contains("recursive"),
+        "{results:?}"
+    );
+    assert_eq!(results[2], "true|5|undefined");
+    assert!(
+        results[3].starts_with("false|undefined|") && results[3].contains("nope"),
+        "{results:?}"
+    );
 
     // Endless recursion is an error, not a crash; deep data is fine.
     let recursed = playlist_error(&plugin, "recurse").await;
