@@ -12,7 +12,7 @@
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "0.4.0",
+  version: "0.5.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -151,8 +151,15 @@ async function getPlayer() {
     veena.log(`signature-shaped: ${c.name}(${c.params.join(",")}) ${c.start}`);
   }
   const byName = (items) => items.map((c) => ({ label: c.name, expr: c.name }));
-  const signature = pick("signature", [...shaped, ...sites.signature], lookup, isSignatureFunction, 8000);
   const n = pick("n", [...sites.n, ...byName(candidates.n)], lookup, isNFunction, 8000);
+  let signature = pick("signature", [...shaped, ...sites.signature], lookup, isSignatureFunction, 6000);
+  // The player fixes a link's n value and its signature in the same place,
+  // so the signature function is called near where n is applied.
+  if (!signature && n?.index !== undefined) {
+    const around = code.slice(Math.max(0, n.index - 700), n.index + 500).replace(/\s+/g, " ");
+    veena.log(`code around ${n.label}: ${around}`);
+    signature = pick("signature (near n)", callsNear(code, n.index, 1500), lookup, isSignatureFunction, 6000);
+  }
   veena.log(`player ${id}: chose ${signature?.label ?? "none"} and ${n?.label ?? "none"}`);
   if (!signature) throw new Error(`player ${id}: signature function not found`);
   if (!n) throw new Error(`player ${id}: n function not found`);
@@ -255,11 +262,27 @@ function callSites(code) {
   }
   const n = [];
   for (const m of code.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*(?:\[\d+\])?)\(((?:[\w$]+,){0,2})\1\)/g)) {
-    n.push({ label: `${m[2]}(${m[3]}…)`, expr: `(function(s){return ${m[2]}(${m[3]}s)})` });
+    n.push({ label: `${m[2]}(${m[3]}…)`, expr: `(function(s){return ${m[2]}(${m[3]}s)})`, index: m.index });
   }
   // Recent players reach the n function through a list: try those first.
   n.sort((a, b) => Number(b.label.includes("[")) - Number(a.label.includes("[")));
   return { signature: unique(signature), n: unique(n) };
+}
+
+/**
+ * Wrappers for each function called within `radius` characters of
+ * `index`, keeping simple leading arguments: `F(3,x)` becomes `F(3,s)`.
+ */
+function callsNear(code, index, radius) {
+  const start = Math.max(0, index - radius);
+  const nearby = code.slice(start, index + radius);
+  const out = new Map();
+  for (const m of nearby.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*(?:\[\d+\])?)\(((?:[\w$.]+,){0,3})/g)) {
+    if (/^(?:if|for|while|switch|catch|function|return|typeof|new)$/.test(m[1])) continue;
+    const expr = `(function(s){return ${m[1]}(${m[2]}s)})`;
+    if (!out.has(expr)) out.set(expr, { label: `${m[1]}(${m[2]}…)`, expr });
+  }
+  return [...out.values()];
 }
 
 /**
@@ -365,7 +388,7 @@ function pick(kind, candidates, lookup, test, timeLimitMs) {
         const verdict = test(found.value);
         if (verdict === true) {
           veena.log(`${kind}: ${candidate.label} matches (tested ${tested})`);
-          return { label: candidate.label, fn: found.value };
+          return { label: candidate.label, fn: found.value, index: candidate.index };
         }
         reason = verdict;
       } catch (e) {
