@@ -12,7 +12,7 @@
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "0.3.0",
+  version: "0.4.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -141,23 +141,18 @@ async function getPlayer() {
 
   const candidates = findFunctions(code);
   const sites = callSites(code);
+  const shaped = signatureShaped(code, candidates.signature);
   veena.log(
-    `player ${id}: ${candidates.all.length} one-argument functions; ` +
+    `player ${id}: ${candidates.all.length} functions; ` +
       `${sites.signature.length} signature and ${sites.n.length} n call sites; ` +
       `${candidates.signature.length} signature-shaped and ${candidates.n.length} n-shaped functions`,
   );
-  const byName = (names) => names.map((name) => ({ label: name, expr: name }));
-  let signature = pick("signature", [...sites.signature, ...byName(candidates.signature)], lookup, isSignatureFunction, 6000);
-  let n = pick("n", [...sites.n, ...byName(candidates.n)], lookup, isNFunction, 8000);
-  // Fallback: test every function of a plausible size, within a time limit.
-  if (!signature) {
-    const small = candidates.all.filter((c) => c.length < 2500).map((c) => c.name);
-    signature = pick("signature (scan)", byName(small), lookup, isSignatureFunction, 4000);
+  for (const c of candidates.signature.slice(0, 6)) {
+    veena.log(`signature-shaped: ${c.name}(${c.params.join(",")}) ${c.start}`);
   }
-  if (!n) {
-    const large = candidates.all.filter((c) => c.length > 1000).map((c) => c.name);
-    n = pick("n (scan)", byName(large), lookup, isNFunction, 4000);
-  }
+  const byName = (items) => items.map((c) => ({ label: c.name, expr: c.name }));
+  const signature = pick("signature", [...shaped, ...sites.signature], lookup, isSignatureFunction, 8000);
+  const n = pick("n", [...sites.n, ...byName(candidates.n)], lookup, isNFunction, 8000);
   veena.log(`player ${id}: chose ${signature?.label ?? "none"} and ${n?.label ?? "none"}`);
   if (!signature) throw new Error(`player ${id}: signature function not found`);
   if (!n) throw new Error(`player ${id}: n function not found`);
@@ -278,27 +273,53 @@ function findFunctions(code) {
   const signature = [];
   const n = [];
   const header =
-    /(?:^|[;,{}\s(])([A-Za-z_$][\w$]*)\s*=\s*function\(\s*([\w$]+)\s*\)\s*\{|function\s+([A-Za-z_$][\w$]*)\(\s*([\w$]+)\s*\)\s*\{/g;
-  // `{a=a.split(` or `{a=a[`: the parameter split into itself.
+    /(?:^|[;,{}\s(])([A-Za-z_$][\w$]*)\s*=\s*function\(\s*([\w$]+(?:\s*,\s*[\w$]+){0,2})\s*\)\s*\{|function\s+([A-Za-z_$][\w$]*)\(\s*([\w$]+(?:\s*,\s*[\w$]+){0,2})\s*\)\s*\{/g;
+  // `{a=a.split(` or `{a=a[`: an argument split into itself.
   const splitsSelf = /^\{\s*([\w$]+)\s*=\s*([\w$]+)\s*(?:\.split\b|\[)/;
-  // `{var b=a.split(` or `{var b=a[`: the parameter split into a variable.
+  // `{var b=a.split(` or `{var b=a[`: an argument split into a variable.
   const splitsIntoVar = /^\{\s*var\s+[\w$]+\s*=\s*([\w$]+)\s*(?:\.split\b|\[)/;
   for (const match of code.matchAll(header)) {
     const name = match[1] ?? match[3];
-    const param = match[2] ?? match[4];
+    const params = (match[2] ?? match[4]).split(",").map((p) => p.trim());
+    const last = params[params.length - 1];
     // Measuring up to 3000 characters tells small from large; longer
     // bodies count as large.
     const body = bodyAt(code, match.index + match[0].length - 1, 3000);
     all.push({ name, length: body.length });
     const self = splitsSelf.exec(body);
     const intoVar = splitsIntoVar.exec(body);
-    const wordy = body.includes("split") && body.includes("join");
-    if (body.length < 2500 && ((self && self[1] === param && self[2] === param) || (wordy && body.length < 600))) {
-      signature.push(name);
+    if (body.length < 2500 && self && self[1] === last && self[2] === last) {
+      signature.push({ name, params, start: body.slice(0, 70) });
     }
-    if (body.length > 600 && ((intoVar && intoVar[1] === param) || wordy)) n.push(name);
+    if (params.length === 1 && body.length > 600 && intoVar && intoVar[1] === last) n.push({ name });
   }
   return { all, signature, n };
+}
+
+/**
+ * Wrapper expressions for signature-shaped functions. One-argument
+ * functions are used directly; for `F(x,a)` the leading arguments are
+ * taken from a place the player calls it, e.g. `F(3,`.
+ */
+function signatureShaped(code, shapes) {
+  const out = [];
+  for (const { name, params } of shapes) {
+    if (params.length === 1) {
+      out.push({ label: name, expr: name });
+      continue;
+    }
+    const lead = params.length - 1;
+    const escaped = name.replace(/\$/g, "\\$");
+    const call = new RegExp(`(?:^|[^\\w$.])${escaped}\\(((?:[\\w$.]+,){${lead}})`, "g");
+    const seen = new Set();
+    for (const m of code.matchAll(call)) {
+      if (seen.has(m[1])) continue;
+      seen.add(m[1]);
+      out.push({ label: `${name}(${m[1]}…)`, expr: `(function(s){return ${name}(${m[1]}s)})` });
+      if (seen.size >= 3) break;
+    }
+  }
+  return out;
 }
 
 /** The function body starting at the `{` at `open`, by brace matching. */

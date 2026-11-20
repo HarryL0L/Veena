@@ -258,7 +258,7 @@ fn search_response() -> Value {
 /// helper steps in an object, a decoy looks similar but changes nothing,
 /// the n function is long, and setup code fails without a real page.
 const FAKE_PLAYER: &str = r#"var _yt_player={};(function(g){var window=this;
-var T=["sp"+"lit","","jo"+"in"];
+var T=["sp"+"lit","","jo"+"in","decodeURI"+"Component"];
 var Zq={Ab:function(a,b){a.splice(0,b)},Cd:function(a){a.reverse()},Ef:function(a,b){var c=a[0];a[0]=a[b%a.length];a[b%a.length]=c}};
 var Decoy=function(a){a=a[T[0]](T[1]);return a[T[2]](T[1])};
 var Sig=function(x,a){a=a[T[0]](T[1]);Zq.Cd(a,7);Zq.Ab(a,x);Zq.Ef(a,40);return a[T[2]](T[1])};
@@ -266,7 +266,7 @@ var Nfn=function(a){var b=a[T[0]](T[1]),c=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1
 try{for(var i=0;i<b.length;i++){b[i]=String.fromCharCode((b[i].charCodeAt(0)-48+7)%75+48)}b.reverse()}catch(d){return"enhanced_except_"+a}return b[T[2]](T[1])};
 var Yx=[Nfn];
 var Loopy=function(a){var b=a;while(true){}return b};
-var use=function(a,b){var c=a.get("n");c&&(c=Loopy(c));c&&(c=Yx[0](c),a.set("n",c));var s=b.s;s&&(b.sig=Sig(3,decodeURIComponent(s)))};
+var use=function(a,b){var c=a.get("n");c&&(c=Loopy(c));c&&(c=Yx[0](c),a.set("n",c));var s=b.s;s&&(b.sig=Sig(3,window[T[3]](s)))};
 var cfg={signatureTimestamp:20123,flags:{}};
 new Intl.NumberFormat("en").format(1);
 document.createElement("video").canPlayType("audio/mp4");
