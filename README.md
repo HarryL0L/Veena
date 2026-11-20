@@ -84,7 +84,7 @@ Plugins are small JavaScript files run by an embedded engine inside the core. Au
 
 Plugins can only reach the domains they declare. They have no file system access.
 
-On Linux, `yt-dlp` is available as an optional fallback and stays up to date automatically.
+On Linux, `yt-dlp` will be available as an optional fallback that stays up to date automatically.
 
 ---
 
