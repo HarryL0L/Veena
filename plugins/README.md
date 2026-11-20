@@ -27,6 +27,7 @@ export const meta = {
   api: 1,                     // host API version
   kinds: ["example"],         // content kinds; defaults to the id
   domains: ["example.com"],   // the only hosts this plugin may contact
+  priority: 0,                // optional: higher is tried first for audio links
 };
 
 export async function search(query) {
@@ -129,7 +130,7 @@ Memory use is not limited yet. Plugins are trusted code: in a later release ever
 | `archive-org.js` | Internet Archive: free and public-domain audio. Search + audio links. |
 | `youtube-music.js` | YouTube Music songs, albums and playlists. Search only; labels tracks `youtube`. |
 | `youtube-audio.js` | Audio links for `youtube` tracks (AAC). Tries several YouTube app types in turn. |
-| `youtube-tv-audio.js` | Audio links for `youtube` tracks via the TV app type. Runs YouTube's player code to solve its scrambling. |
+| `youtube-tv-audio.js` | Audio links for `youtube` tracks. Runs YouTube's player code to unscramble links, following [yt-dlp's ejs](https://github.com/yt-dlp/ejs) method (public domain). Tried first (`priority: 10`). |
 
 Test an audio-link brick without playing:
 

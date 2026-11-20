@@ -263,10 +263,16 @@ var Zq={Ab:function(a,b){a.splice(0,b)},Cd:function(a){a.reverse()},Ef:function(
 var Decoy=function(a){a=a[T[0]](T[1]);return a[T[2]](T[1])};
 var Sig=function(x,a){var r=[];r=a[T[0]](T[1]);Zq.Cd(r,7);Zq.Ab(r,x);Zq.Ef(r,40);return r[T[2]](T[1])};
 var Nfn=function(a){var b=a[T[0]](T[1]),c=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180];
-try{for(var i=0;i<b.length;i++){b[i]=String.fromCharCode((b[i].charCodeAt(0)-48+7)%75+48)}b.reverse()}catch(d){return"enhanced_except_"+a}return b[T[2]](T[1])};
+var A="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";try{for(var i=0;i<b.length;i++){b[i]=A[(A.indexOf(b[i])+7)%64]}b.reverse()}catch(d){return"enhanced_except_"+a}return b[T[2]](T[1])};
 var Yx=[Nfn];
 var Loopy=function(a){var b=a;while(true){}return b};
 var use=function(a,b){var c=a.get("n");c&&(c=Loopy(c));c&&(c=Yx[0](c),a.set("n",c),b.s&&a.set("sig",Sig(3,b.s)))};
+var Url=function(a){this.q={};var i=a.indexOf("?");if(i>=0)a.slice(i+1).split("&").forEach(function(p){var k=p.split("=");this.q[k[0]]=k[1]}.bind(this))};
+Url.prototype.set=function(k,v){this.q[k]=v};
+Url.prototype.get=function(k){return this.q[k]};
+Url.prototype.clone=function(){return this};
+Url.prototype.finish=function(){var n=this.get("n");n&&this.set("n",Yx[0](n))};
+var lm=function(a,b,c){b=b===void 0?"":b;c=c===void 0?"":c;a=new Url(a);a.set("alr","yes");c&&(c=Sig(3,window[T[3]](c)),a.set(b,encodeURIComponent(c)));return a};
 var cfg={signatureTimestamp:20123,flags:{}};
 new Intl.NumberFormat("en").format(1);
 document.createElement("video").canPlayType("audio/mp4");
@@ -290,9 +296,11 @@ fn expected_signature(s: &str) -> String {
 
 /// What the fake player's n function computes.
 fn expected_n(n: &str) -> String {
+    const ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let alphabet: Vec<char> = ALPHABET.chars().collect();
     let mut out: Vec<char> = n
         .chars()
-        .map(|c| char::from_u32((c as u32 - 48 + 7) % 75 + 48).unwrap())
+        .map(|c| alphabet[(ALPHABET.find(c).unwrap() + 7) % 64])
         .collect();
     out.reverse();
     out.into_iter().collect()

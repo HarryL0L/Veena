@@ -7,7 +7,7 @@
 export const meta = {
   id: "youtube-music",
   name: "YouTube Music",
-  version: "0.1.0",
+  version: "0.2.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com"],
@@ -23,10 +23,22 @@ const SESSION_CACHE_SECONDS = 6 * 3600;
 export async function search(query) {
   const terms = query.trim();
   if (!terms) return [];
-  const data = await api("search", { query: terms, params: veena.config.searchParams ?? SONGS_FILTER });
+  const filter = veena.config.searchParams ?? SONGS_FILTER;
+  let tracks = await searchWith(terms, filter);
+  // In some regions the songs-only filter finds nothing; search everything.
+  if (tracks.length === 0 && filter) {
+    veena.log("no songs found; searching without the songs filter");
+    tracks = await searchWith(terms, undefined);
+  }
+  return tracks;
+}
+
+async function searchWith(terms, params) {
+  const data = await api("search", { query: terms, ...(params ? { params } : {}) });
   const tracks = collectTracks(data);
-  if (tracks.length === 0 && !hasNoResultsMessage(data)) {
-    throw new Error(`could not read search results (${describe(data)})`);
+  if (tracks.length === 0) {
+    if (!hasNoResultsMessage(data)) throw new Error(`could not read search results (${describe(data)})`);
+    veena.log(`no results: ${messageText(data) ?? describe(data)}`);
   }
   return tracks;
 }
@@ -158,6 +170,13 @@ function parseRow(row) {
     durationMs: duration ? toSeconds(duration) * 1000 : undefined,
     artwork: thumbnails.at(-1)?.url,
   };
+}
+
+/** The text of the first message YouTube shows instead of results. */
+function messageText(data) {
+  const message = find(data, (n) => n.messageRenderer)?.messageRenderer;
+  const runs = find(message, (n) => Array.isArray(n.runs))?.runs;
+  return runs?.map((r) => r.text).join("");
 }
 
 function hasNoResultsMessage(data) {

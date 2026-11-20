@@ -58,6 +58,9 @@ pub struct PluginMeta {
     /// Hosts the plugin may contact. Subdomains are included.
     #[serde(default)]
     pub domains: Vec<String>,
+    /// Higher is tried first among audio-link bricks for the same kind.
+    #[serde(default)]
+    pub priority: i32,
 }
 
 impl PluginMeta {

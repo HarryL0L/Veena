@@ -223,8 +223,10 @@ impl Resolver for PluginBrick {
     }
 }
 
-/// Load every `.js` file in a folder, sorted by name. Each result is
-/// reported separately so one broken plugin does not block the others.
+/// Load every `.js` file in a folder. Plugins come back highest `priority`
+/// first (then by file name), so installing them in order sets the fallback
+/// order. Each result is reported separately so one broken plugin does not
+/// block the others.
 pub async fn load_dir(
     dir: &Path,
     options: &Options,
@@ -239,5 +241,8 @@ pub async fn load_dir(
         let plugin = PluginBrick::load_file(&path, options.clone()).await;
         plugins.push((path, plugin));
     }
+    plugins.sort_by_key(|(_, plugin)| {
+        std::cmp::Reverse(plugin.as_ref().map_or(i32::MIN, |p| p.meta.priority))
+    });
     Ok(plugins)
 }

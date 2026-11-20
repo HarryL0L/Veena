@@ -7,24 +7,54 @@
 // code in Veena's JavaScript engine and finds the two functions by what
 // they do rather than by name.
 //
+// The main method follows yt-dlp's ejs solver (public domain,
+// github.com/yt-dlp/ejs): find the player's URL-building function by the
+// `X.set("alr","yes")` statement it contains, then let it unscramble a
+// test URL. Older function searches remain as a fallback.
+//
 // Only AAC (audio/mp4) is returned: Veena can't decode Opus yet.
 
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "0.5.0",
+  version: "1.0.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
+  // Tried before youtube-audio, whose links are now cut off after 1 MB.
+  priority: 10,
 };
 
 const BASE = veena.config.baseUrl ?? "https://www.youtube.com";
-const CLIENT = {
-  name: "TVHTML5",
-  id: 7,
-  version: veena.config.tvClientVersion ?? "7.20250312.16.00",
+/** The simplified TV app: works without a proof-of-origin token. */
+const TV_SIMPLY = {
+  name: "TVHTML5_SIMPLY",
+  id: 75,
+  version: "1.0",
   userAgent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
 };
+
+/** The TV app. Its version is read from YouTube's TV page when possible. */
+const TV = {
+  name: "TVHTML5",
+  id: 7,
+  version: "7.20250312.16.00",
+  userAgent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+  page: "/tv",
+};
+
+/** The Oculus Quest app; its links carry an n value to transform too. */
+const QUEST = {
+  name: "ANDROID_VR",
+  id: 28,
+  version: "1.65.10",
+  userAgent:
+    "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+  extra: { deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L" },
+};
+
+/** App types to try, in order; replaceable through `veena.config.tvClients`. */
+const CLIENTS = veena.config.tvClients ?? [TV_SIMPLY, TV, QUEST];
 /** Links without a proof-of-origin token stop working after this point. */
 const TOKEN_FREE_LIMIT = 1024 * 1024;
 
@@ -33,28 +63,52 @@ let player;
 
 export async function resolve(track) {
   const solved = await getPlayer();
+  const problems = [];
+  for (const client of CLIENTS) {
+    let label = `${client.name} ${client.version}`;
+    try {
+      const current = await withCurrentVersion(client);
+      label = `${current.name} ${current.version}`;
+      const streams = await streamsFrom(current, track.id, solved);
+      const failure = await probe(streams[0]);
+      if (failure) throw new Error(`links refused when downloading ${failure}`);
+      veena.log(`${label}: links work`);
+      return streams.map(({ size, ...stream }) => stream);
+    } catch (e) {
+      const problem = `${label}: ${e.message ?? e}`;
+      veena.log(problem);
+      problems.push(problem);
+    }
+  }
+  throw new Error(problems.join("; "));
+}
+
+async function streamsFrom(client, videoId, solved) {
   const visitor = await visitorData();
   const res = await veena.http.fetch(`${BASE}/youtubei/v1/player?prettyPrint=false`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "User-Agent": CLIENT.userAgent,
+      "User-Agent": client.userAgent,
       Origin: "https://www.youtube.com",
-      "X-YouTube-Client-Name": String(CLIENT.id),
-      "X-YouTube-Client-Version": CLIENT.version,
+      Referer: `https://www.youtube.com${client.page ?? "/"}`,
+      "X-YouTube-Client-Name": String(client.id),
+      "X-YouTube-Client-Version": client.version,
       ...(visitor ? { "X-Goog-Visitor-Id": visitor } : {}),
     },
     body: JSON.stringify({
       context: {
         client: {
-          clientName: CLIENT.name,
-          clientVersion: CLIENT.version,
+          clientName: client.name,
+          clientVersion: client.version,
           hl: "en",
           gl: veena.config.region ?? "US",
+          userAgent: client.userAgent,
           visitorData: visitor,
+          ...client.extra,
         },
       },
-      videoId: track.id,
+      videoId,
       playbackContext: {
         contentPlaybackContext: { signatureTimestamp: solved.signatureTimestamp, html5Preference: "HTML5_PREF_WANTS" },
       },
@@ -73,18 +127,35 @@ export async function resolve(track) {
     .filter((f) => f.mimeType?.startsWith("audio/mp4") && (f.url || f.signatureCipher || f.cipher))
     .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
   if (formats.length === 0) throw new Error("no AAC audio offered");
-
-  const streams = formats.map((f) => ({
+  return formats.map((f) => ({
     url: unscramble(f, solved),
     mime: "audio/mp4",
     bitrate: f.averageBitrate ?? f.bitrate,
     size: Number(f.contentLength) || undefined,
-    headers: { "User-Agent": CLIENT.userAgent },
+    headers: { "User-Agent": client.userAgent },
   }));
-  const failure = await probe(streams[0]);
-  if (failure) throw new Error(`links refused when downloading ${failure}`);
-  veena.log("TV links work");
-  return streams.map(({ size, ...stream }) => stream);
+}
+
+/** Use the app version YouTube's own page for that app currently serves. */
+async function withCurrentVersion(client) {
+  if (!client.page) return client;
+  const key = `version:${client.name}`;
+  let version = veena.cache.get(key);
+  if (!version) {
+    try {
+      const res = await veena.http.fetch(`${BASE}${client.page}`, {
+        headers: { "User-Agent": client.userAgent, Cookie: "SOCS=CAI", "Accept-Language": "en" },
+      });
+      version = /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/.exec(res.text)?.[1];
+      const jsUrl = /"(?:PLAYER_JS_URL|jsUrl)":"([^"]+)"/.exec(res.text)?.[1];
+      const sts = /"STS":(\d+)/.exec(res.text)?.[1];
+      veena.log(`${client.name}: current version ${version ?? "not found"}; player ${jsUrl ?? "not found"}; STS ${sts ?? "not found"}`);
+    } catch (e) {
+      veena.log(`${client.name}: could not read the current version: ${e}`);
+    }
+    if (version) veena.cache.set(key, version, 24 * 3600);
+  }
+  return version ? { ...client, version } : client;
 }
 
 // ---------------------------------------------------------------- Links
@@ -131,6 +202,7 @@ async function getPlayer() {
   if (!res.ok) throw new Error(`player code download failed with status ${res.status}`);
   const code = res.text;
   veena.log(`player ${id}: ${Math.round(code.length / 1024)} KB`);
+  if (veena.config.debugGrep) debugGrep(code, veena.config.debugGrep, veena.config.debugContext ?? 150);
 
   const sts = /(?:signatureTimestamp|sts)\s*:\s*(\d+)/.exec(code);
   if (!sts) throw new Error(`player ${id}: no signature timestamp found`);
@@ -138,6 +210,12 @@ async function getPlayer() {
   const started = Date.now();
   const lookup = load(code);
   veena.log(`player ${id}: ran in ${Date.now() - started} ms`);
+
+  const viaUrl = urlBuilderSolver(code, lookup);
+  if (viaUrl) {
+    player = { id, signatureTimestamp: Number(sts[1]), ...viaUrl };
+    return player;
+  }
 
   const candidates = findFunctions(code);
   const sites = callSites(code);
@@ -151,8 +229,10 @@ async function getPlayer() {
     veena.log(`signature-shaped: ${c.name}(${c.params.join(",")}) ${c.start}`);
   }
   const byName = (items) => items.map((c) => ({ label: c.name, expr: c.name }));
-  const n = pick("n", [...sites.n, ...byName(candidates.n)], lookup, isNFunction, 8000);
-  let signature = pick("signature", [...shaped, ...sites.signature], lookup, isSignatureFunction, 6000);
+  const dispatched = dispatcherCalls(code);
+  veena.log(`player ${id}: ${dispatched.length} dispatcher calls`);
+  const n = pick("n", [...sites.n, ...byName(candidates.n), ...dispatched], lookup, isNFunction, 8000);
+  let signature = pick("signature", [...shaped, ...sites.signature, ...dispatched], lookup, isSignatureFunction, 8000);
   // The player fixes a link's n value and its signature in the same place,
   // so the signature function is called near where n is applied.
   if (!signature && n?.index !== undefined) {
@@ -224,7 +304,7 @@ function installBrowserStandIns() {
   };
   const standIns = {
     document: anything(),
-    navigator: { userAgent: CLIENT.userAgent, language: "en", platform: "" },
+    navigator: { userAgent: TV.userAgent, language: "en", platform: "" },
     location,
     // The engine is built without Intl; the player only formats with it.
     Intl: anything(),
@@ -267,6 +347,21 @@ function callSites(code) {
   // Recent players reach the n function through a list: try those first.
   n.sort((a, b) => Number(b.label.includes("[")) - Number(a.label.includes("[")));
   return { signature: unique(signature), n: unique(n) };
+}
+
+/**
+ * Calls of "dispatcher" functions: newer players fold several jobs into
+ * one function whose first two numbers select the job, so the signature
+ * and n functions are calls like `F(12,3456,x)`. Each becomes a wrapper
+ * `s => F(12,3456,s)`.
+ */
+function dispatcherCalls(code) {
+  const out = new Map();
+  for (const m of code.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*)\((\d+),(\d+),[\w$.]+\)/g)) {
+    const expr = `(function(s){return ${m[1]}(${m[2]},${m[3]},s)})`;
+    if (!out.has(expr)) out.set(expr, { label: `${m[1]}(${m[2]},${m[3]},…)`, expr });
+  }
+  return [...out.values()];
 }
 
 /**
@@ -363,6 +458,79 @@ function bodyAt(code, open, max) {
 }
 
 /**
+ * Functions whose body has `X.set("alr","yes");` as a statement of its own.
+ * In current players this is the function that builds a stream URL:
+ * `F(url, "s", scrambledSignature)` returns a URL object whose signature is
+ * already unscrambled, and one more method of that object transforms n.
+ */
+function urlBuilders(code) {
+  const names = [];
+  const header = /(?:^|[;,{}\s])([A-Za-z_$][\w$.]*)\s*=\s*function\([^)]*\)\s*\{|function\s+([A-Za-z_$][\w$]*)\([^)]*\)\s*\{/g;
+  for (const m of code.matchAll(/[;{]\s*[\w$]+\.[\w$]+\("alr","yes"\);/g)) {
+    const before = code.slice(Math.max(0, m.index - 1500), m.index + 1);
+    let last;
+    for (const h of before.matchAll(header)) last = h;
+    if (!last) continue;
+    const open = m.index - before.length + 1 + last.index + last[0].length - 1;
+    const body = bodyAt(code, open, 20000);
+    if (open + body.length > m.index) names.push(last[1] ?? last[2]);
+  }
+  return [...new Set(names)];
+}
+
+/** Unscramble with a URL builder, following yt-dlp's ejs. */
+function solveWithUrl(make, sig, n) {
+  const url = make("https://youtube.com/watch?v=veena", "s", sig ? encodeURIComponent(sig) : undefined);
+  url.set("n", n);
+  const proto = Object.getPrototypeOf(url);
+  const keys = Object.keys(proto).concat(Object.getOwnPropertyNames(proto));
+  for (const key of keys) {
+    if (!["constructor", "set", "get", "clone"].includes(key)) {
+      url[key]();
+      break;
+    }
+  }
+  const s = url.get("s");
+  return { sig: s ? decodeURIComponent(s) : null, n: url.get("n") ?? null };
+}
+
+/** Signature and n functions from the first URL builder that works. */
+function urlBuilderSolver(code, lookup) {
+  const builders = urlBuilders(code);
+  veena.log(`URL builders: ${builders.join(", ") || "none"}`);
+  for (const name of builders) {
+    const found = veena.attempt(lookup, name);
+    if (!found.ok || typeof found.value !== "function") {
+      veena.log(`${name}: not usable (${found.error ?? typeof found.value})`);
+      continue;
+    }
+    const make = found.value;
+    const signature = (s) => {
+      const out = safely(solveWithUrl, make, s, SAMPLE_N).sig;
+      if (typeof out !== "string") throw new Error("signature not unscrambled");
+      return out;
+    };
+    const n = (value) => {
+      const out = safely(solveWithUrl, make, undefined, value).n;
+      if (typeof out !== "string" || out.startsWith("enhanced_except")) throw new Error("n not transformed");
+      return out;
+    };
+    try {
+      const sigVerdict = isSignatureFunction(signature);
+      const nVerdict = isNFunction(n);
+      if (sigVerdict === true && nVerdict === true) {
+        veena.log(`${name}: solves signature and n`);
+        return { signature, n };
+      }
+      veena.log(`${name}: signature ${sigVerdict}, n ${nVerdict}`);
+    } catch (e) {
+      veena.log(`${name}: failed: ${String(e.message ?? e).slice(0, 100)}`);
+    }
+  }
+  return undefined;
+}
+
+/**
  * The first candidate that behaves as `test` expects. Candidates are
  * `{ label, expr }`, where `expr` is evaluated inside the player's scope.
  * Logs why the first few were rejected, to help when YouTube changes.
@@ -425,13 +593,22 @@ function isSignatureFunction(fn) {
   return safely(fn, SAMPLE_SIGNATURE) === out ? true : "not repeatable";
 }
 
-/** Turns a short code into a different short code, the same way each time. */
+const SAMPLE_N2 = "Zy9Xw8Vu7Ts6Rq5P";
+
+/**
+ * Turns a short code into a different short code of the same alphabet, the
+ * same way each time, and different codes into different results (so a
+ * function that maps everything to one word is rejected).
+ */
 function isNFunction(fn) {
   const out = safely(fn, SAMPLE_N);
   if (typeof out !== "string") return `returned ${typeof out}`;
   if (out === SAMPLE_N) return "returned its input";
   if (out.startsWith("enhanced_except")) return `reported failure: ${out.slice(0, 40)}`;
-  if (out.length < 8 || out.length > 40) return `returned length ${out.length}`;
+  if (!/^[A-Za-z0-9_-]{8,40}$/.test(out)) return `returned ${JSON.stringify(out.slice(0, 30))}`;
+  const other = safely(fn, SAMPLE_N2);
+  if (other === out) return "same result for different inputs";
+  if (typeof other !== "string" || !/^[A-Za-z0-9_-]{8,40}$/.test(other)) return "second input failed";
   return safely(fn, SAMPLE_N) === out ? true : "not repeatable";
 }
 
@@ -453,6 +630,16 @@ function wrapSignature(fn) {
 }
 
 // ---------------------------------------------------------------- Helpers
+
+/** Development aid: log where a pattern occurs in the player code. */
+function debugGrep(code, pattern, context) {
+  const matches = [...code.matchAll(new RegExp(pattern, "g"))];
+  veena.log(`debugGrep /${pattern}/: ${matches.length} matches`);
+  for (const m of matches.slice(0, veena.config.debugLimit ?? 8)) {
+    const around = code.slice(Math.max(0, m.index - context), m.index + m[0].length + context);
+    veena.log(`@${m.index}: ${around.replace(/\s+/g, " ")}`);
+  }
+}
 
 async function visitorData() {
   const cached = veena.cache.get("visitor");
