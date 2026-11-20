@@ -15,6 +15,13 @@ use tokio::sync::oneshot;
 use crate::host::{self, HOST, HostState};
 use crate::{Options, PluginError, PluginMeta};
 
+/// Which slots a plugin fills, from its exports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Slots {
+    pub catalog: bool,
+    pub resolver: bool,
+}
+
 /// A request to run one exported function.
 pub struct Job {
     pub function: &'static str,
@@ -27,7 +34,7 @@ pub struct Job {
 pub fn spawn(
     code: Arc<str>,
     options: Arc<Options>,
-    ready: oneshot::Sender<Result<PluginMeta, PluginError>>,
+    ready: oneshot::Sender<Result<(PluginMeta, Slots), PluginError>>,
 ) -> std::io::Result<mpsc::Sender<Job>> {
     let (jobs_tx, jobs_rx) = mpsc::channel::<Job>();
     thread::Builder::new()
@@ -40,7 +47,7 @@ pub fn spawn(
                     return;
                 }
             };
-            let _ = ready.send(Ok(runtime.meta.clone()));
+            let _ = ready.send(Ok((runtime.meta.clone(), runtime.slots)));
             for job in jobs_rx {
                 let result = runtime.call(job.function, job.args);
                 let _ = job.reply.send(result);
@@ -53,6 +60,7 @@ struct Runtime {
     context: Context,
     exports: JsObject,
     meta: PluginMeta,
+    slots: Slots,
 }
 
 impl Runtime {
@@ -89,13 +97,18 @@ impl Runtime {
             serde_json::from_value(meta).map_err(|e| PluginError::InvalidMeta(e.to_string()))?;
         meta.validate()?;
 
-        for required in ["search", "resolve"] {
-            let export = exports
-                .get(js_string!(required), &mut context)
-                .map_err(|e| PluginError::Load(e.to_string()))?;
-            if !export.is_callable() {
-                return Err(PluginError::MissingExport(required));
-            }
+        let mut exported = |name: &str| -> Result<bool, PluginError> {
+            Ok(exports
+                .get(js_string!(name), &mut context)
+                .map_err(|e| PluginError::Load(e.to_string()))?
+                .is_callable())
+        };
+        let slots = Slots {
+            catalog: exported("search")?,
+            resolver: exported("resolve")?,
+        };
+        if !slots.catalog && !slots.resolver {
+            return Err(PluginError::NothingProvided);
         }
 
         let domains = options
@@ -113,6 +126,7 @@ impl Runtime {
             context,
             exports,
             meta,
+            slots,
         })
     }
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-use veena_core::{Repeat, Source, SourceRegistry, Track, UrlSource};
+use veena_core::{Catalog, Repeat, SourceRegistry, Track, UrlSource};
 use veena_player::Player;
 use veena_plugin::Options;
 use veena_src_local::LocalSource;
@@ -37,10 +37,10 @@ enum Command {
         #[command(flatten)]
         playback: PlaybackArgs,
     },
-    /// Search every source (plugins included) and optionally play the results.
+    /// Search every installed catalog and optionally play the results.
     Find {
         query: String,
-        /// Only search this source, e.g. `archive-org`.
+        /// Only search this catalog, e.g. `archive-org`.
         #[arg(short, long)]
         source: Option<String>,
         /// Show at most this many results per source.
@@ -54,7 +54,7 @@ enum Command {
     },
     /// List a plugin playlist or album, optionally playing it.
     Open {
-        /// Source id, e.g. `archive-org`.
+        /// Catalog id, e.g. `archive-org`.
         source: String,
         /// Playlist or album id.
         id: String,
@@ -64,7 +64,7 @@ enum Command {
         #[command(flatten)]
         playback: PlaybackArgs,
     },
-    /// Show installed plugins.
+    /// Show installed bricks (plugins).
     Plugins,
     /// List the music found in folders.
     List {
@@ -141,8 +141,8 @@ async fn main() -> Result<()> {
             playback,
         } => {
             let registry = registry(plugins_dir.as_ref(), true).await;
-            let Some(provider) = registry.get(&source) else {
-                bail!("unknown source `{source}`; run `veena plugins` to see what is installed");
+            let Some(provider) = registry.catalog(&source) else {
+                bail!("no catalog `{source}`; run `veena plugins` to see what is installed");
             };
             let tracks = provider.playlist(&id).await?;
             print_tracks(&tracks);
@@ -176,12 +176,12 @@ fn default_plugins_dir() -> Option<PathBuf> {
     Some(data.join("veena/plugins"))
 }
 
-/// Built-in sources plus every plugin that loads.
+/// Built-in bricks plus every plugin that loads.
 async fn registry(plugins_dir: Option<&PathBuf>, report_failures: bool) -> SourceRegistry {
     let registry = SourceRegistry::new();
-    // Resolves any local path, so no folders need to be scanned up front.
-    registry.register(Arc::new(LocalSource::default()));
-    registry.register(Arc::new(UrlSource));
+    // Plays any local path, so no folders need to be scanned up front.
+    registry.add_resolver(Arc::new(LocalSource::default()));
+    registry.add_resolver(Arc::new(UrlSource));
 
     let Some(dir) = plugins_dir.filter(|d| d.is_dir()) else {
         return registry;
@@ -190,7 +190,7 @@ async fn registry(plugins_dir: Option<&PathBuf>, report_failures: bool) -> Sourc
         Ok(plugins) => {
             for (path, plugin) in plugins {
                 match plugin {
-                    Ok(plugin) => registry.register(Arc::new(plugin)),
+                    Ok(plugin) => Arc::new(plugin).install(&registry),
                     Err(e) if report_failures => {
                         eprintln!("skipping plugin {}: {e}", path.display());
                     }
@@ -224,7 +224,17 @@ async fn show_plugins(plugins_dir: Option<&PathBuf>) {
         match plugin {
             Ok(plugin) => {
                 let meta = plugin.meta();
+                let slots = match (plugin.is_catalog(), plugin.is_resolver()) {
+                    (true, true) => "search + audio links",
+                    (true, false) => "search",
+                    _ => "audio links",
+                };
                 println!("  {:<16} {} {}", meta.id, meta.name, meta.version);
+                println!(
+                    "  {:<16} {slots}  ·  kinds: {}",
+                    "",
+                    meta.kinds().join(", ")
+                );
                 println!(
                     "  {:<16} {}  ·  can contact: {}",
                     "",
@@ -237,7 +247,7 @@ async fn show_plugins(plugins_dir: Option<&PathBuf>) {
     }
 }
 
-/// Search sources and print numbered results. Returns them in order.
+/// Search catalogs and print numbered results. Returns them in order.
 async fn find(
     registry: &SourceRegistry,
     query: &str,
@@ -245,19 +255,17 @@ async fn find(
     limit: usize,
 ) -> Result<Vec<Track>> {
     let sources: Vec<_> = registry
-        .sources()
+        .catalogs()
         .into_iter()
         .filter(|s| only.is_none_or(|id| s.id() == id))
-        // Local and URL sources need folders or links, not free-text search.
-        .filter(|s| only.is_some() || ![LocalSource::ID, UrlSource::ID].contains(&s.id()))
         .collect();
     if sources.is_empty() {
         match only {
             Some(id) => {
-                bail!("unknown source `{id}`; run `veena plugins` to see what is installed")
+                bail!("no catalog `{id}`; run `veena plugins` to see what is installed")
             }
             None => bail!(
-                "no plugins installed; add .js plugins to the plugin folder (see `veena plugins`)"
+                "no search bricks installed; add .js plugins to the plugin folder (see `veena plugins`)"
             ),
         }
     }

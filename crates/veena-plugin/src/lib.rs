@@ -1,12 +1,13 @@
-//! JavaScript plugins for Veena.
+//! JavaScript plugins for Veena: the bricks that update without an app update.
 //!
-//! A plugin is one JavaScript module that finds music and returns playable
-//! streams. Plugins are plain files, so they can be updated without
-//! rebuilding the app.
+//! A plugin is one JavaScript module. Exporting `search` fills the search
+//! slot ([`veena_core::Catalog`]); exporting `resolve` fills the audio-link
+//! slot ([`veena_core::Resolver`]). A plugin may fill either or both.
 //!
 //! ```js
 //! export const meta = {
 //!   id: "example", name: "Example", version: "1.0.0", api: 1,
+//!   kinds: ["example"],                // content kinds it labels or plays
 //!   domains: ["example.com"],          // the only hosts it may contact
 //! };
 //! export async function search(query) {
@@ -23,23 +24,23 @@
 //! host API (`veena.http`, `veena.cache`, `veena.config`, `veena.log`), and
 //! network access is limited to the domains it declares.
 
+mod brick;
 mod convert;
 mod host;
 mod runtime;
-mod source;
 
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-pub use source::{PluginSource, load_dir};
+pub use brick::{PluginBrick, load_dir};
 
 /// Version of the host API plugins are written against. A plugin must
 /// declare the same `api` number to be loaded.
 pub const API_VERSION: u32 = 1;
 
-/// Ids used by built-in sources, which plugins may not take over.
-pub const RESERVED_IDS: &[&str] = &["local", "url"];
+/// Ids and kinds used by built-in bricks, which plugins may not take over.
+pub const RESERVED_IDS: &[&str] = &["local", "url", "file"];
 
 /// The `meta` object a plugin exports.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,30 +51,38 @@ pub struct PluginMeta {
     pub version: String,
     /// Host API version the plugin targets.
     pub api: u32,
+    /// Content kinds the plugin labels tracks with (search) or can play
+    /// (resolve). Defaults to the plugin id.
+    #[serde(default)]
+    pub kinds: Vec<String>,
     /// Hosts the plugin may contact. Subdomains are included.
     #[serde(default)]
     pub domains: Vec<String>,
 }
 
 impl PluginMeta {
-    fn validate(&self) -> Result<(), PluginError> {
-        let id_ok = !self.id.is_empty()
-            && self.id.len() <= 64
-            && self
-                .id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if !id_ok {
-            return Err(PluginError::InvalidMeta(format!(
-                "id `{}` must be 1-64 lowercase letters, digits or hyphens",
-                self.id
-            )));
+    /// Content kinds, defaulting to the plugin id.
+    pub fn kinds(&self) -> Vec<String> {
+        if self.kinds.is_empty() {
+            vec![self.id.clone()]
+        } else {
+            self.kinds.clone()
         }
-        if RESERVED_IDS.contains(&self.id.as_str()) {
-            return Err(PluginError::InvalidMeta(format!(
-                "id `{}` is reserved",
-                self.id
-            )));
+    }
+
+    fn validate(&self) -> Result<(), PluginError> {
+        let names = std::iter::once(("id", &self.id)).chain(self.kinds.iter().map(|k| ("kind", k)));
+        for (what, name) in names {
+            if !is_valid_name(name) {
+                return Err(PluginError::InvalidMeta(format!(
+                    "{what} `{name}` must be 1-64 lowercase letters, digits or hyphens"
+                )));
+            }
+            if RESERVED_IDS.contains(&name.as_str()) {
+                return Err(PluginError::InvalidMeta(format!(
+                    "{what} `{name}` is reserved"
+                )));
+            }
         }
         if self.api != API_VERSION {
             return Err(PluginError::IncompatibleApi {
@@ -86,6 +95,15 @@ impl PluginMeta {
         }
         Ok(())
     }
+}
+
+/// An id or kind: lowercase letters, digits and hyphens.
+pub(crate) fn is_valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// A bare host name such as `example.com` (no scheme, path or wildcard).
@@ -158,6 +176,9 @@ pub enum PluginError {
 
     #[error("plugin does not export `{0}`")]
     MissingExport(&'static str),
+
+    #[error("plugin exports neither `search` nor `resolve`")]
+    NothingProvided,
 
     #[error("plugin error: {0}")]
     Script(String),

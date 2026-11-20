@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use lofty::prelude::*;
-use veena_core::{Error, Result, Source, Stream, Track, TrackId, async_trait};
+use veena_core::{Catalog, Error, Resolver, Result, Stream, Track, TrackId, async_trait};
 use walkdir::WalkDir;
 
 /// File extensions Veena can decode.
@@ -20,7 +20,10 @@ pub struct LocalSource {
 }
 
 impl LocalSource {
+    /// Brick id.
     pub const ID: &'static str = "local";
+    /// Content kind of local files; track ids are file paths.
+    pub const KIND: &'static str = "file";
 
     /// Create a source over the given folders and scan them.
     pub fn new(roots: impl IntoIterator<Item = PathBuf>) -> Self {
@@ -47,7 +50,7 @@ impl LocalSource {
 
     /// Read one file into a track, using its tags when present.
     pub fn track_from_path(path: &Path) -> Track {
-        let id = TrackId::new(Self::ID, path.to_string_lossy());
+        let id = TrackId::new(Self::KIND, path.to_string_lossy());
         let fallback_title = path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -101,7 +104,7 @@ pub fn scan(roots: &[PathBuf]) -> Vec<Track> {
 }
 
 #[async_trait]
-impl Source for LocalSource {
+impl Catalog for LocalSource {
     fn id(&self) -> &str {
         Self::ID
     }
@@ -133,6 +136,21 @@ impl Source for LocalSource {
             })
             .cloned()
             .collect())
+    }
+}
+
+#[async_trait]
+impl Resolver for LocalSource {
+    fn id(&self) -> &str {
+        Self::ID
+    }
+
+    fn name(&self) -> &str {
+        "Local files"
+    }
+
+    fn kinds(&self) -> Vec<String> {
+        vec![Self::KIND.to_owned()]
     }
 
     async fn resolve(&self, track: &Track) -> Result<Vec<Stream>> {

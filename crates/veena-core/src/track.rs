@@ -4,18 +4,22 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-/// Globally unique track identifier: which source it came from, plus the
-/// source's own id for it (a file path, a video id, ...).
+/// Globally unique track identifier: what kind of content it is, plus the
+/// id within that kind (a file path, a video id, ...).
+///
+/// The kind describes the content, not the brick that found it, so tracks
+/// from any catalog can be played by any resolver for that kind. Example:
+/// `youtube:dQw4w9WgXcQ`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TrackId {
-    pub source: String,
+    pub kind: String,
     pub id: String,
 }
 
 impl TrackId {
-    pub fn new(source: impl Into<String>, id: impl Into<String>) -> Self {
+    pub fn new(kind: impl Into<String>, id: impl Into<String>) -> Self {
         Self {
-            source: source.into(),
+            kind: kind.into(),
             id: id.into(),
         }
     }
@@ -23,7 +27,7 @@ impl TrackId {
 
 impl fmt::Display for TrackId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.source, self.id)
+        write!(f, "{}:{}", self.kind, self.id)
     }
 }
 

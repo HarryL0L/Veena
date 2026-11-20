@@ -14,6 +14,8 @@ use crate::PluginError;
 #[serde(rename_all = "camelCase")]
 struct PluginTrack {
     id: String,
+    /// Content kind; defaults to the plugin's first kind.
+    kind: Option<String>,
     title: String,
     artist: Option<String>,
     album: Option<String>,
@@ -40,13 +42,22 @@ enum OneOrMany<T> {
     One(T),
 }
 
-pub fn tracks(source: &str, value: Value) -> Result<Vec<Track>, PluginError> {
+pub fn tracks(default_kind: &str, value: Value) -> Result<Vec<Track>, PluginError> {
     let items: Vec<PluginTrack> = serde_json::from_value(value)
         .map_err(|e| PluginError::InvalidResult(format!("expected a list of tracks: {e}")))?;
+    if let Some(bad) = items
+        .iter()
+        .filter_map(|t| t.kind.as_deref())
+        .find(|k| !crate::is_valid_name(k))
+    {
+        return Err(PluginError::InvalidResult(format!(
+            "invalid track kind `{bad}`"
+        )));
+    }
     Ok(items
         .into_iter()
         .map(|t| Track {
-            id: TrackId::new(source, t.id),
+            id: TrackId::new(t.kind.as_deref().unwrap_or(default_kind), t.id),
             title: t.title,
             artist: t.artist.filter(|s| !s.is_empty()),
             album: t.album.filter(|s| !s.is_empty()),
@@ -86,6 +97,7 @@ pub fn streams(value: Value) -> Result<Vec<Stream>, PluginError> {
 pub fn track_to_js(track: &Track) -> Value {
     json!({
         "id": track.id.id,
+        "kind": track.id.kind,
         "title": track.title,
         "artist": track.artist,
         "album": track.album,

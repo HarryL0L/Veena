@@ -3,8 +3,10 @@ use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
-use veena_core::{Error, Source, StreamLocation, Track, TrackId};
-use veena_plugin::{Limits, Options, PluginError, PluginSource};
+use std::sync::Arc;
+
+use veena_core::{Catalog, Error, Resolver, SourceRegistry, StreamLocation, Track, TrackId};
+use veena_plugin::{Limits, Options, PluginBrick, PluginError};
 
 /// A local web server: `/search` returns JSON, `/out` redirects to a
 /// disallowed host, `/in` redirects to `/search`.
@@ -98,11 +100,11 @@ fn track(id: &str) -> Track {
     Track::new(TrackId::new("test", id), id)
 }
 
-async fn load(code: &str) -> Result<PluginSource, PluginError> {
-    PluginSource::load(code.to_owned(), Options::default()).await
+async fn load(code: &str) -> Result<PluginBrick, PluginError> {
+    PluginBrick::load(code.to_owned(), Options::default()).await
 }
 
-async fn playlist_error(plugin: &PluginSource, id: &str) -> String {
+async fn playlist_error(plugin: &PluginBrick, id: &str) -> String {
     match plugin.playlist(id).await {
         Err(e) => e.to_string(),
         Ok(tracks) => panic!("expected an error for {id}, got {tracks:?}"),
@@ -113,7 +115,8 @@ async fn playlist_error(plugin: &PluginSource, id: &str) -> String {
 async fn search_and_resolve() {
     let base = server();
     let plugin = load(&plugin_code(&base)).await.unwrap();
-    assert_eq!(plugin.id(), "test");
+    assert_eq!(plugin.meta().id, "test");
+    assert!(plugin.is_catalog() && plugin.is_resolver());
     assert_eq!(plugin.meta().version, "1.0.0");
 
     let tracks = plugin.search("some song").await.unwrap();
@@ -179,7 +182,7 @@ async fn cache_config_and_errors() {
         config,
         ..Options::default()
     };
-    let plugin = PluginSource::load(plugin_code(&base), options)
+    let plugin = PluginBrick::load(plugin_code(&base), options)
         .await
         .unwrap();
 
@@ -242,7 +245,7 @@ async fn trusted_domains_override_declared_ones() {
         domains: Some(vec!["other.net".into()]),
         ..Options::default()
     };
-    let plugin = PluginSource::load(code, options).await.unwrap();
+    let plugin = PluginBrick::load(code, options).await.unwrap();
     assert_eq!(plugin.domains(), ["other.net"]);
     assert!(plugin.resolve(&track("x")).await.is_ok());
 }
@@ -264,7 +267,7 @@ async fn timeout_restarts_plugin() {
         loop_iterations: u64::MAX,
         ..Limits::default()
     };
-    let plugin = PluginSource::load(
+    let plugin = PluginBrick::load(
         code,
         Options {
             limits,
@@ -331,10 +334,16 @@ async fn load_errors() {
         Err(PluginError::InvalidMeta(_))
     ));
 
-    let no_resolve = format!("{} export function search() {{ return []; }}", meta(""));
+    let nothing = meta("");
     assert!(matches!(
-        load(&no_resolve).await,
-        Err(PluginError::MissingExport("resolve"))
+        load(&nothing).await,
+        Err(PluginError::NothingProvided)
+    ));
+
+    let reserved_kind = format!("{} {functions}", meta(r#", kinds: ["file"]"#));
+    assert!(matches!(
+        load(&reserved_kind).await,
+        Err(PluginError::InvalidMeta(_))
     ));
 
     let import = format!(r#"import fs from "fs"; {} {functions}"#, meta(""));
@@ -373,4 +382,71 @@ async fn host_api_is_read_only() {
     );
     let plugin = load(&code).await.unwrap();
     assert_eq!(plugin.search("").await.unwrap(), vec![]);
+}
+
+#[tokio::test]
+async fn single_slot_bricks_and_kinds() {
+    // A search-only brick labels its tracks with a content kind...
+    let catalog = format!(
+        r#"{} export function search(q) {{
+          return [{{ id: "v1", title: q }}, {{ id: "x", title: "other", kind: "archive" }}];
+        }}"#,
+        meta(r#", kinds: ["youtube"]"#)
+    );
+    let catalog = Arc::new(load(&catalog).await.unwrap());
+    assert!(catalog.is_catalog() && !catalog.is_resolver());
+    let tracks = catalog.search("song").await.unwrap();
+    assert_eq!(tracks[0].id, TrackId::new("youtube", "v1"));
+    assert_eq!(tracks[1].id, TrackId::new("archive", "x"));
+
+    // ...and a separate audio-link-only brick plays that kind.
+    let resolver = r#"export const meta = { id: "yt-audio", name: "YT audio", version: "1", api: 1,
+        kinds: ["youtube"], domains: ["127.0.0.1"] };
+      export function resolve(track) {
+        return [{ url: `http://127.0.0.1/${track.kind}/${track.id}` }];
+      }"#;
+    let resolver = Arc::new(load(resolver).await.unwrap());
+    assert!(!resolver.is_catalog() && resolver.is_resolver());
+    assert_eq!(resolver.kinds(), ["youtube"]);
+
+    let registry = SourceRegistry::new();
+    catalog.clone().install(&registry);
+    resolver.clone().install(&registry);
+    assert_eq!(registry.catalogs().len(), 1);
+    assert_eq!(registry.resolvers().len(), 1);
+
+    let streams = registry.resolve(&tracks[0]).await.unwrap();
+    assert!(
+        matches!(&streams[0].location, StreamLocation::Http { url, .. } if url == "http://127.0.0.1/youtube/v1")
+    );
+    assert!(
+        matches!(registry.resolve(&tracks[1]).await, Err(Error::NoResolver(kind)) if kind == "archive")
+    );
+}
+
+#[tokio::test]
+async fn installing_a_new_version_replaces_the_old_one() {
+    let both = format!(
+        "{} export function search() {{ return []; }} export function resolve() {{ return []; }}",
+        meta("")
+    );
+    let search_only = format!(
+        r#"{} export function search() {{ return [{{ id: "new", title: "new" }}]; }}"#,
+        meta("")
+    );
+    let registry = SourceRegistry::new();
+    Arc::new(load(&both).await.unwrap()).install(&registry);
+    assert_eq!(
+        (registry.catalogs().len(), registry.resolvers().len()),
+        (1, 1)
+    );
+
+    // The update drops `resolve`, so it leaves the audio-link slot.
+    Arc::new(load(&search_only).await.unwrap()).install(&registry);
+    assert_eq!(
+        (registry.catalogs().len(), registry.resolvers().len()),
+        (1, 0)
+    );
+    let tracks = registry.catalog("test").unwrap().search("").await.unwrap();
+    assert_eq!(tracks[0].title, "new");
 }

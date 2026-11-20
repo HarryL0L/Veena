@@ -1,7 +1,19 @@
 # Writing a Veena plugin
 
-A plugin is one JavaScript file that finds music and returns something playable.
+A plugin is a brick: one JavaScript file that plugs into Veena's slots.
 Veena runs it in a sandbox and can update it without an app update.
+
+---
+
+## Slots
+
+| Slot | Fill it by exporting | Job |
+|---|---|---|
+| **Search** | `search` (and optionally `playlist`) | Find music and return tracks |
+| **Audio links** | `resolve` | Turn a track into a playable link |
+
+A plugin fills one slot or both. Tracks carry a **kind**, such as `youtube`, that describes the content rather than the plugin that found it.
+Any audio-link brick that handles that kind can play the track. When several can, Veena tries them in order and falls back to the next if one fails.
 
 ---
 
@@ -13,6 +25,7 @@ export const meta = {
   name: "Example Music",
   version: "1.0.0",
   api: 1,                     // host API version
+  kinds: ["example"],         // content kinds; defaults to the id
   domains: ["example.com"],   // the only hosts this plugin may contact
 };
 
@@ -47,18 +60,19 @@ The plugin folder is `~/.local/share/veena/plugins`. Use `--plugins <folder>` to
 | Export | Required | Receives | Returns |
 |---|---|---|---|
 | `meta` | Yes | | Plugin details (see above) |
-| `search(query)` | Yes | Search text | List of tracks |
-| `resolve(track)` | Yes | A track from `search` or `playlist` | One stream, or a list of streams (best first) |
+| `search(query)` | For the search slot | Search text | List of tracks |
 | `playlist(id)` | No | Playlist or album id | List of tracks |
+| `resolve(track)` | For the audio-link slot | A track of one of `meta.kinds` | One stream, or a list of streams (best first) |
 
-Functions may be `async` or plain.
+At least one of `search` and `resolve` is required. Functions may be `async` or plain.
 
 **Track**
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Required. Your own id; passed back to `resolve`. |
+| `id` | string | Required. Id within its kind, e.g. a video id. |
 | `title` | string | Required. |
+| `kind` | string | Optional. Defaults to the first of `meta.kinds`. |
 | `artist`, `album`, `artwork` | string | Optional. |
 | `durationMs` | number | Optional. |
 
@@ -110,4 +124,4 @@ Memory use is not limited yet. Plugins are trusted code: in a later release ever
 
 | File | Source |
 |---|---|
-| `archive-org.js` | Internet Archive: free and public-domain audio |
+| `archive-org.js` | Internet Archive: free and public-domain audio. Search + audio links. |

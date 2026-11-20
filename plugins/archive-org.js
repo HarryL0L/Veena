@@ -9,6 +9,7 @@ export const meta = {
   name: "Internet Archive",
   version: "1.0.0",
   api: 1,
+  kinds: ["archive-org"],
   domains: ["archive.org"],
 };
 

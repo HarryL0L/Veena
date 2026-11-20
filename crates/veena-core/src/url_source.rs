@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::{Error, Result, Source, Stream, Track, TrackId};
+use crate::{Error, Resolver, Result, Stream, Track, TrackId};
 
 /// Plays direct `http(s)://` links to audio files.
 #[derive(Debug, Default)]
@@ -26,7 +26,7 @@ impl UrlSource {
 }
 
 #[async_trait]
-impl Source for UrlSource {
+impl Resolver for UrlSource {
     fn id(&self) -> &str {
         Self::ID
     }
@@ -35,11 +35,8 @@ impl Source for UrlSource {
         "Direct links"
     }
 
-    async fn search(&self, query: &str) -> Result<Vec<Track>> {
-        Ok(Self::is_url(query)
-            .then(|| Self::track(query))
-            .into_iter()
-            .collect())
+    fn kinds(&self) -> Vec<String> {
+        vec![Self::ID.to_owned()]
     }
 
     async fn resolve(&self, track: &Track) -> Result<Vec<Stream>> {

@@ -73,7 +73,14 @@ new app release.
 
 ## Plugins
 
-Plugins are small JavaScript files run by an embedded engine inside the core. Automatic, signed updates work as follows (in development):
+The app is one stable piece. Only the parts that need constant updates are plugins: small JavaScript files, called bricks, run by an engine built into the core. The same brick runs on Android and Linux.
+
+| Slot | Job | Fallback |
+|---|---|---|
+| **Search** | Find songs, albums and artists | Every search brick is queried |
+| **Audio links** | Turn a song into a playable link | If one brick fails, the next is tried |
+
+Automatic, signed updates work as follows (in development):
 
 | Step | What happens |
 |---|---|
@@ -161,6 +168,7 @@ Planned: `apps/android` (Compose via UniFFI), a Slint desktop app and the plugin
 
 - [x] Core playback for local files and streams
 - [x] Plugin engine and sandbox
+- [x] Search and audio-link slots with automatic fallback
 - [ ] YouTube Music plugin
 - [ ] Automatic, signed plugin updates
 - [ ] Android app with Material 3 Expressive
