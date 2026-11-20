@@ -73,8 +73,14 @@ fn serve(seen: Arc<Mutex<Seen>>) -> String {
             request.body = String::from_utf8(body).unwrap();
 
             let (content_type, body) = respond(&request, &seen, &stream_base);
+            // Like YouTube refusing links that need a token.
+            let status = if request.path.starts_with("/forbidden") {
+                "403 Forbidden"
+            } else {
+                "200 OK"
+            };
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
             let _ = stream.write_all(response.as_bytes());
@@ -118,6 +124,21 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
             let user_agent = request.header("user-agent");
             let response = if user_agent.contains("oculus") {
                 json!({"playabilityStatus": {"status": "LOGIN_REQUIRED", "reason": "Sign in to confirm you're not a bot"}})
+            } else if video == "denied" {
+                json!({
+                    "playabilityStatus": {"status": "OK"},
+                    "streamingData": {"adaptiveFormats": [
+                        {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000, "url": format!("{base}/forbidden")},
+                    ]}
+                })
+            } else if video == "opus-only" {
+                json!({
+                    "playabilityStatus": {"status": "OK"},
+                    "streamingData": {"adaptiveFormats": [
+                        {"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 160000, "url": format!("{base}/opus")},
+                        {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000, "signatureCipher": "s=x"},
+                    ]}
+                })
             } else if video == "blocked" {
                 json!({"playabilityStatus": {"status": "UNPLAYABLE", "reason": "Video unavailable"}})
             } else {
@@ -279,6 +300,21 @@ async fn audio_links_fall_back_and_pick_aac() {
         }
         other => panic!("unexpected {other:?}"),
     }
+
+    // Links that are refused on download are skipped, not returned.
+    let denied = Track::new(TrackId::new("youtube", "denied"), "x");
+    let error = audio.resolve(&denied).await.unwrap_err().to_string();
+    assert!(
+        error.contains("IOS: links refused when downloading (status 403)"),
+        "{error}"
+    );
+
+    let opus = Track::new(TrackId::new("youtube", "opus-only"), "x");
+    let error = audio.resolve(&opus).await.unwrap_err().to_string();
+    assert!(
+        error.contains("1 audio/webm with links, 1 audio/mp4 needing signatures"),
+        "{error}"
+    );
 
     let blocked = Track::new(TrackId::new("youtube", "blocked"), "x");
     let error = audio.resolve(&blocked).await.unwrap_err().to_string();

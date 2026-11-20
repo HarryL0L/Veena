@@ -10,7 +10,7 @@
 export const meta = {
   id: "youtube-audio",
   name: "YouTube audio",
-  version: "0.1.0",
+  version: "0.2.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -43,13 +43,28 @@ export async function resolve(track) {
   for (const client of clients) {
     try {
       const streams = await streamsFrom(client, track.id);
-      if (streams.length > 0) return streams;
-      problems.push(`${client.name}: no AAC audio with a direct link`);
+      // YouTube can hand out links it then refuses to serve, so check one.
+      const status = await probe(streams[0]);
+      if (status === 200 || status === 206) {
+        veena.log(`${client.name}: links work`);
+        return streams;
+      }
+      throw new Error(`links refused when downloading (status ${status})`);
     } catch (e) {
-      problems.push(`${client.name}: ${e.message ?? e}`);
+      const problem = `${client.name}: ${e.message ?? e}`;
+      veena.log(problem);
+      problems.push(problem);
     }
   }
   throw new Error(problems.join("; "));
+}
+
+/** Download the first two bytes of a stream; returns the HTTP status. */
+async function probe(stream) {
+  const res = await veena.http.fetch(stream.url, {
+    headers: { ...stream.headers, Range: "bytes=0-1" },
+  });
+  return res.status;
 }
 
 async function streamsFrom(client, videoId) {
@@ -86,7 +101,7 @@ async function streamsFrom(client, videoId) {
   }
 
   const formats = data.streamingData?.adaptiveFormats ?? [];
-  return formats
+  const streams = formats
     .filter((f) => f.url && f.mimeType?.startsWith("audio/mp4"))
     .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))
     .map((f) => ({
@@ -96,4 +111,20 @@ async function streamsFrom(client, videoId) {
       // Streams are checked against the app type that requested them.
       headers: { "User-Agent": client.userAgent },
     }));
+  if (streams.length === 0) {
+    throw new Error(`no AAC audio with a direct link (${summarize(formats)})`);
+  }
+  return streams;
+}
+
+/** e.g. "3 audio/webm with links, 2 audio/mp4 needing signatures". */
+function summarize(formats) {
+  if (formats.length === 0) return "no formats";
+  const counts = {};
+  for (const f of formats.filter((f) => f.mimeType?.startsWith("audio/"))) {
+    const kind = `${f.mimeType.split(";")[0]} ${f.url ? "with links" : "needing signatures"}`;
+    counts[kind] = (counts[kind] ?? 0) + 1;
+  }
+  const parts = Object.entries(counts).map(([kind, n]) => `${n} ${kind}`);
+  return parts.length ? parts.join(", ") : "no audio formats";
 }

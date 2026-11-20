@@ -320,12 +320,15 @@ struct StderrLogger;
 static STDERR_LOGGER: StderrLogger = StderrLogger;
 
 impl log::Log for StderrLogger {
-    fn enabled(&self, _: &log::Metadata) -> bool {
-        true
+    /// Veena's own messages at any level; other libraries only warnings.
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.target().starts_with("veena") || metadata.level() <= log::Level::Warn
     }
 
     fn log(&self, record: &log::Record) {
-        eprintln!("[{}] {}", record.level(), record.args());
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] {}", record.level(), record.args());
+        }
     }
 
     fn flush(&self) {}
