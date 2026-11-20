@@ -1,0 +1,376 @@
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
+use std::thread;
+use std::time::Duration;
+
+use veena_core::{Error, Source, StreamLocation, Track, TrackId};
+use veena_plugin::{Limits, Options, PluginError, PluginSource};
+
+/// A local web server: `/search` returns JSON, `/out` redirects to a
+/// disallowed host, `/in` redirects to `/search`.
+fn server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).unwrap();
+            let mut user_agent = String::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("x-test: ") {
+                    user_agent = v.trim().to_owned();
+                }
+            }
+            let path = request_line.split(' ').nth(1).unwrap_or("/").to_owned();
+            let response = if path.starts_with("/search") {
+                let body = format!(
+                    r#"[{{"id":"a1","name":"Song A","by":"Band","ms":61000}},{{"id":"b2","name":"Song B","by":"","ms":null,"header":"{user_agent}"}}]"#
+                );
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            } else if path == "/out" {
+                "HTTP/1.1 302 Found\r\nLocation: http://evil.example/steal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()
+            } else if path == "/in" {
+                "HTTP/1.1 302 Found\r\nLocation: /search?q=redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()
+            } else {
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()
+            };
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    format!("http://{addr}")
+}
+
+fn meta(extra: &str) -> String {
+    format!(
+        r#"export const meta = {{ id: "test", name: "Test", version: "1.0.0", api: 1, domains: ["127.0.0.1"] {extra} }};"#
+    )
+}
+
+/// A complete plugin talking to the test server.
+fn plugin_code(base: &str) -> String {
+    format!(
+        r#"{meta}
+const BASE = "{base}";
+
+export async function search(query) {{
+  const res = await veena.http.fetch(`${{BASE}}/search?q=${{encodeURIComponent(query)}}`, {{ headers: {{ "X-Test": "hello" }} }});
+  if (!res.ok) throw new Error(`status ${{res.status}}`);
+  return res.json().map((item) => ({{ id: item.id, title: item.name, artist: item.by, durationMs: item.ms, album: item.header }}));
+}}
+
+export function resolve(track) {{
+  return {{ url: `${{BASE}}/audio/${{track.id}}.m4a`, mime: "audio/mp4", bitrate: 128000 / 3, headers: {{ Referer: BASE }} }};
+}}
+
+export async function playlist(id) {{
+  if (id === "redirect-in") {{
+    const res = await veena.http.fetch(`${{BASE}}/in`);
+    return [{{ id: res.url, title: String(res.status) }}];
+  }}
+  if (id === "redirect-out") {{ await veena.http.fetch(`${{BASE}}/out`); return []; }}
+  if (id === "elsewhere") {{ await veena.http.fetch("https://example.org/"); return []; }}
+  if (id === "file") {{ await veena.http.fetch("file:///etc/passwd"); return []; }}
+  if (id === "many") {{ for (let i = 0; i < 100; i++) await veena.http.fetch(`${{BASE}}/x`); return []; }}
+  if (id === "cache-set") {{ veena.cache.set("k", "v1"); veena.cache.set("short", "x", 0.05); return []; }}
+  if (id === "cache-get") {{ return [{{ id: veena.cache.get("k") ?? "none", title: veena.cache.get("short") ?? "expired" }}]; }}
+  if (id === "config") {{ return [{{ id: veena.config.client, title: String(veena.apiVersion) }}]; }}
+  if (id === "throw") throw new TypeError("boom");
+  if (id === "loop") {{ while (true) {{}} }}
+  if (id === "bad-stream") return [{{ id: 1 }}];
+  if (id === "fraction") return [{{ id: "f", title: "f", durationMs: 1500.7 }}];
+  return [];
+}}
+"#,
+        meta = meta("")
+    )
+}
+
+fn track(id: &str) -> Track {
+    Track::new(TrackId::new("test", id), id)
+}
+
+async fn load(code: &str) -> Result<PluginSource, PluginError> {
+    PluginSource::load(code.to_owned(), Options::default()).await
+}
+
+async fn playlist_error(plugin: &PluginSource, id: &str) -> String {
+    match plugin.playlist(id).await {
+        Err(e) => e.to_string(),
+        Ok(tracks) => panic!("expected an error for {id}, got {tracks:?}"),
+    }
+}
+
+#[tokio::test]
+async fn search_and_resolve() {
+    let base = server();
+    let plugin = load(&plugin_code(&base)).await.unwrap();
+    assert_eq!(plugin.id(), "test");
+    assert_eq!(plugin.meta().version, "1.0.0");
+
+    let tracks = plugin.search("some song").await.unwrap();
+    assert_eq!(tracks.len(), 2);
+    assert_eq!(tracks[0].id, TrackId::new("test", "a1"));
+    assert_eq!(tracks[0].title, "Song A");
+    assert_eq!(tracks[0].artist.as_deref(), Some("Band"));
+    assert_eq!(tracks[0].duration, Some(Duration::from_secs(61)));
+    assert_eq!(tracks[1].artist, None, "empty strings become None");
+    assert_eq!(
+        tracks[1].album.as_deref(),
+        Some("hello"),
+        "request headers are sent"
+    );
+
+    let streams = plugin.resolve(&tracks[0]).await.unwrap();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0].mime.as_deref(), Some("audio/mp4"));
+    assert_eq!(streams[0].bitrate, Some(42667));
+    match &streams[0].location {
+        StreamLocation::Http { url, headers } => {
+            assert_eq!(url, &format!("{base}/audio/a1.m4a"));
+            assert_eq!(headers, &[("Referer".to_owned(), base.clone())]);
+        }
+        other => panic!("unexpected location {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn network_rules() {
+    let base = server();
+    let plugin = load(&plugin_code(&base)).await.unwrap();
+
+    let redirected = plugin.playlist("redirect-in").await.unwrap();
+    assert_eq!(redirected[0].id.id, format!("{base}/search?q=redirected"));
+    assert_eq!(redirected[0].title, "200");
+
+    assert!(
+        playlist_error(&plugin, "redirect-out")
+            .await
+            .contains("not allowed to contact evil.example")
+    );
+    assert!(
+        playlist_error(&plugin, "elsewhere")
+            .await
+            .contains("not allowed to contact example.org")
+    );
+    let file = playlist_error(&plugin, "file").await;
+    assert!(file.contains("only http and https"), "{file}");
+    assert!(
+        playlist_error(&plugin, "many")
+            .await
+            .contains("request limit")
+    );
+}
+
+#[tokio::test]
+async fn cache_config_and_errors() {
+    let base = server();
+    let mut config = serde_json::Map::new();
+    config.insert("client".into(), "WEB_REMIX".into());
+    let options = Options {
+        config,
+        ..Options::default()
+    };
+    let plugin = PluginSource::load(plugin_code(&base), options)
+        .await
+        .unwrap();
+
+    plugin.playlist("cache-set").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let cached = plugin.playlist("cache-get").await.unwrap();
+    assert_eq!(
+        (cached[0].id.id.as_str(), cached[0].title.as_str()),
+        ("v1", "expired")
+    );
+
+    let config = plugin.playlist("config").await.unwrap();
+    assert_eq!(
+        (config[0].id.id.as_str(), config[0].title.as_str()),
+        ("WEB_REMIX", "1")
+    );
+
+    assert!(
+        playlist_error(&plugin, "throw")
+            .await
+            .contains("TypeError: boom")
+    );
+    assert!(
+        playlist_error(&plugin, "bad-stream")
+            .await
+            .contains("invalid data")
+    );
+    let fraction = plugin.playlist("fraction").await.unwrap();
+    assert_eq!(fraction[0].duration.map(|d| d.as_millis()), Some(1500));
+
+    // An endless loop is stopped by the loop limit; the plugin keeps working.
+    let looped = playlist_error(&plugin, "loop").await;
+    assert!(looped.to_lowercase().contains("loop"), "{looped}");
+    assert_eq!(plugin.search("x").await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn streams_must_use_allowed_domains() {
+    let code = format!(
+        r#"{} export async function search() {{ return []; }}
+        export async function resolve() {{ return [{{ url: "https://cdn.other.net/a.mp3" }}]; }}"#,
+        meta("")
+    );
+    let plugin = load(&code).await.unwrap();
+    let error = plugin.resolve(&track("x")).await.unwrap_err().to_string();
+    assert!(
+        error.contains("not allowed to contact cdn.other.net"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn trusted_domains_override_declared_ones() {
+    let code = format!(
+        r#"{} export async function search() {{ return []; }}
+        export async function resolve() {{ return [{{ url: "https://cdn.other.net/a.mp3" }}]; }}"#,
+        meta("")
+    );
+    let options = Options {
+        domains: Some(vec!["other.net".into()]),
+        ..Options::default()
+    };
+    let plugin = PluginSource::load(code, options).await.unwrap();
+    assert_eq!(plugin.domains(), ["other.net"]);
+    assert!(plugin.resolve(&track("x")).await.is_ok());
+}
+
+#[tokio::test]
+async fn timeout_restarts_plugin() {
+    let code = format!(
+        r#"{} let calls = 0;
+        export function search(q) {{
+          calls++;
+          if (q === "slow") {{ const end = Date.now() + 3000; while (Date.now() < end) {{}} }}
+          return [{{ id: String(calls), title: q }}];
+        }}
+        export function resolve() {{ return []; }}"#,
+        meta("")
+    );
+    let limits = Limits {
+        call_timeout: Duration::from_millis(300),
+        loop_iterations: u64::MAX,
+        ..Limits::default()
+    };
+    let plugin = PluginSource::load(
+        code,
+        Options {
+            limits,
+            ..Options::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(plugin.search("a").await.unwrap()[0].id.id, "1");
+    let error = plugin.search("slow").await.unwrap_err().to_string();
+    assert!(error.contains("took longer"), "{error}");
+    // A fresh engine: state from before the restart is gone.
+    assert_eq!(plugin.search("b").await.unwrap()[0].id.id, "1");
+}
+
+#[tokio::test]
+async fn optional_playlist_is_unsupported() {
+    let code = format!(
+        "{} export function search() {{ return []; }} export function resolve() {{ return []; }}",
+        meta("")
+    );
+    let plugin = load(&code).await.unwrap();
+    assert!(matches!(
+        plugin.playlist("x").await,
+        Err(Error::Unsupported { .. })
+    ));
+}
+
+#[tokio::test]
+async fn load_errors() {
+    let functions =
+        "export function search() { return []; } export function resolve() { return []; }";
+
+    let old_api = format!(
+        r#"export const meta = {{ id: "t", name: "T", version: "1", api: 99 }}; {functions}"#
+    );
+    assert!(matches!(
+        load(&old_api).await,
+        Err(PluginError::IncompatibleApi {
+            plugin: 99,
+            host: 1
+        })
+    ));
+
+    let reserved = format!(
+        r#"export const meta = {{ id: "local", name: "T", version: "1", api: 1 }}; {functions}"#
+    );
+    assert!(matches!(
+        load(&reserved).await,
+        Err(PluginError::InvalidMeta(_))
+    ));
+
+    let bad_domain = format!(
+        r#"export const meta = {{ id: "t", name: "T", version: "1", api: 1, domains: ["*.x.com"] }}; {functions}"#
+    );
+    assert!(matches!(
+        load(&bad_domain).await,
+        Err(PluginError::InvalidMeta(_))
+    ));
+
+    let no_meta = functions.to_owned();
+    assert!(matches!(
+        load(&no_meta).await,
+        Err(PluginError::InvalidMeta(_))
+    ));
+
+    let no_resolve = format!("{} export function search() {{ return []; }}", meta(""));
+    assert!(matches!(
+        load(&no_resolve).await,
+        Err(PluginError::MissingExport("resolve"))
+    ));
+
+    let import = format!(r#"import fs from "fs"; {} {functions}"#, meta(""));
+    assert!(matches!(load(&import).await, Err(PluginError::Load(_))));
+
+    let syntax = "export const = ;";
+    assert!(matches!(load(syntax).await, Err(PluginError::Load(_))));
+
+    let top_level_fetch = format!(
+        r#"{} await veena.http.fetch("http://127.0.0.1:1/"); {functions}"#,
+        meta("")
+    );
+    match load(&top_level_fetch).await {
+        Err(PluginError::Load(message)) => assert!(message.contains("not allowed"), "{message}"),
+        other => panic!(
+            "expected load error, got {:?}",
+            other.map(|p| p.meta().clone())
+        ),
+    }
+}
+
+#[tokio::test]
+async fn host_api_is_read_only() {
+    let code = format!(
+        r#"{}
+        export function search() {{
+          "use strict";
+          const results = [];
+          try {{ veena.http.fetch = () => 1; results.push("replaced fetch"); }} catch {{}}
+          try {{ veena.http = null; results.push("replaced http"); }} catch {{}}
+          try {{ globalThis.veena = null; results.push("replaced veena"); }} catch {{}}
+          return results.map((r) => ({{ id: r, title: r }}));
+        }}
+        export function resolve() {{ return []; }}"#,
+        meta("")
+    );
+    let plugin = load(&code).await.unwrap();
+    assert_eq!(plugin.search("").await.unwrap(), vec![]);
+}

@@ -17,7 +17,7 @@ new app release.
 | **Android UI** | Jetpack Compose · Material 3 Expressive |
 | **Linux UI** | Slint |
 | **Sources** | YouTube Music · Local files · Extensible via plugins |
-| **Status** | Early development · Linux terminal player available |
+| **Status** | Early development · Linux terminal player with plugins |
 
 ---
 
@@ -73,7 +73,7 @@ new app release.
 
 ## Plugins
 
-Plugins are small, signed JavaScript files run by an embedded engine inside the core.
+Plugins are small JavaScript files run by an embedded engine inside the core. Automatic, signed updates work as follows (in development):
 
 | Step | What happens |
 |---|---|
@@ -113,6 +113,16 @@ veena list ~/Music                      # show your library
 veena search "raga" --in ~/Music        # find tracks
 ```
 
+**Plugins**
+
+```sh
+veena --plugins ./plugins plugins                       # show installed plugins
+veena --plugins ./plugins find "sitar" --play           # search plugins and play
+veena --plugins ./plugins open archive-org <album-id>   # open an album
+```
+
+Plugins load from `~/.local/share/veena/plugins` by default. See [Writing a Veena plugin](plugins/README.md).
+
 | Key | Action |
 |---|---|
 | `Space` | Play / pause |
@@ -135,19 +145,22 @@ veena/
 │   ├── veena-core/        Tracks, sources, queue
 │   ├── veena-audio/       Decoding, streaming, output
 │   ├── veena-player/      Queue and audio working together
+│   ├── veena-plugin/      JavaScript plugin engine and sandbox
+│   ├── veena-net/         Shared HTTP and TLS setup
 │   └── veena-src-local/   Local music files
-└── apps/
-    └── linux/             Terminal player
+├── apps/
+│   └── linux/             Terminal player
+└── plugins/               Source plugins and the plugin guide
 ```
 
-Planned: `apps/android` (Compose via UniFFI), a Slint desktop app, the plugin engine and updater.
+Planned: `apps/android` (Compose via UniFFI), a Slint desktop app and the plugin updater.
 
 ---
 
 ## Roadmap
 
 - [x] Core playback for local files and streams
-- [ ] Plugin engine and sandbox
+- [x] Plugin engine and sandbox
 - [ ] YouTube Music plugin
 - [ ] Automatic, signed plugin updates
 - [ ] Android app with Material 3 Expressive

@@ -1,5 +1,7 @@
 use std::io::{self, Read, Seek, SeekFrom};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+
+use veena_net::{agent, ureq};
 
 /// Forward seeks up to this distance read through the open connection instead
 /// of starting a new request.
@@ -170,41 +172,6 @@ impl Seek for HttpReader {
         }
         Ok(target)
     }
-}
-
-/// Shared HTTP client.
-///
-/// Uses the bundled Mozilla root certificates so TLS works the same on every
-/// platform. If `SSL_CERT_FILE` points to a PEM bundle, those roots are used
-/// instead, which supports corporate or intercepting proxies.
-fn agent() -> &'static ureq::Agent {
-    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        use ureq::tls::{PemItem, RootCerts, TlsConfig};
-
-        let custom_roots = std::env::var_os("SSL_CERT_FILE")
-            .and_then(|path| std::fs::read(path).ok())
-            .map(|pem| {
-                ureq::tls::parse_pem(&pem)
-                    .filter_map(|item| match item {
-                        Ok(PemItem::Certificate(cert)) => Some(cert),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .filter(|certs| !certs.is_empty());
-
-        let roots = match custom_roots {
-            Some(certs) => RootCerts::new_with_certs(&certs),
-            None => RootCerts::WebPki,
-        };
-
-        ureq::Agent::config_builder()
-            .tls_config(TlsConfig::builder().root_certs(roots).build())
-            .user_agent(concat!("Veena/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .into()
-    })
 }
 
 #[cfg(test)]

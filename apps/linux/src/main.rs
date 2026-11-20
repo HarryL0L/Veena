@@ -12,11 +12,17 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use veena_core::{Repeat, Source, SourceRegistry, Track, UrlSource};
 use veena_player::Player;
+use veena_plugin::Options;
 use veena_src_local::LocalSource;
 
 #[derive(Parser)]
 #[command(name = "veena", version, about = "Veena music player")]
 struct Cli {
+    /// Folder of source plugins (.js files).
+    /// Default: ~/.local/share/veena/plugins
+    #[arg(long, global = true, env = "VEENA_PLUGINS")]
+    plugins: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -28,16 +34,38 @@ enum Command {
         /// Audio files, folders (searched recursively) or URLs.
         #[arg(required = true)]
         inputs: Vec<String>,
-        /// Play in random order.
-        #[arg(short, long)]
-        shuffle: bool,
-        /// What to do at the end of a track or the queue.
-        #[arg(short, long, value_enum, default_value_t = RepeatArg::Off)]
-        repeat: RepeatArg,
-        /// Volume from 0 to 100.
-        #[arg(short, long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
-        volume: u8,
+        #[command(flatten)]
+        playback: PlaybackArgs,
     },
+    /// Search every source (plugins included) and optionally play the results.
+    Find {
+        query: String,
+        /// Only search this source, e.g. `archive-org`.
+        #[arg(short, long)]
+        source: Option<String>,
+        /// Show at most this many results per source.
+        #[arg(short = 'n', long, default_value_t = 10)]
+        limit: usize,
+        /// Play the results.
+        #[arg(short, long)]
+        play: bool,
+        #[command(flatten)]
+        playback: PlaybackArgs,
+    },
+    /// List a plugin playlist or album, optionally playing it.
+    Open {
+        /// Source id, e.g. `archive-org`.
+        source: String,
+        /// Playlist or album id.
+        id: String,
+        /// Play the tracks.
+        #[arg(short, long)]
+        play: bool,
+        #[command(flatten)]
+        playback: PlaybackArgs,
+    },
+    /// Show installed plugins.
+    Plugins,
     /// List the music found in folders.
     List {
         #[arg(required = true)]
@@ -50,6 +78,19 @@ enum Command {
         #[arg(short = 'i', long = "in", required = true)]
         folders: Vec<PathBuf>,
     },
+}
+
+#[derive(clap::Args)]
+struct PlaybackArgs {
+    /// Play in random order.
+    #[arg(long)]
+    shuffle: bool,
+    /// What to do at the end of a track or the queue.
+    #[arg(short, long, value_enum, default_value_t = RepeatArg::Off)]
+    repeat: RepeatArg,
+    /// Volume from 0 to 100.
+    #[arg(short, long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
+    volume: u8,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -71,50 +112,207 @@ impl From<RepeatArg> for Repeat {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    match Cli::parse().command {
-        Command::Play {
-            inputs,
-            shuffle,
-            repeat,
-            volume,
-        } => play(inputs, shuffle, repeat.into(), volume).await,
-        Command::List { folders } => {
-            let tracks = LocalSource::new(folders).tracks();
+    let cli = Cli::parse();
+    let plugins_dir = cli.plugins.or_else(default_plugins_dir);
+    match cli.command {
+        Command::Play { inputs, playback } => {
+            let tracks = collect_tracks(&inputs)?;
+            let registry = registry(plugins_dir.as_ref(), false).await;
+            play(registry, tracks, playback).await
+        }
+        Command::Find {
+            query,
+            source,
+            limit,
+            play: should_play,
+            playback,
+        } => {
+            let registry = registry(plugins_dir.as_ref(), true).await;
+            let tracks = find(&registry, &query, source.as_deref(), limit).await?;
+            if should_play && !tracks.is_empty() {
+                play(registry, tracks, playback).await?;
+            }
+            Ok(())
+        }
+        Command::Open {
+            source,
+            id,
+            play: should_play,
+            playback,
+        } => {
+            let registry = registry(plugins_dir.as_ref(), true).await;
+            let Some(provider) = registry.get(&source) else {
+                bail!("unknown source `{source}`; run `veena plugins` to see what is installed");
+            };
+            let tracks = provider.playlist(&id).await?;
             print_tracks(&tracks);
+            if should_play && !tracks.is_empty() {
+                play(registry, tracks, playback).await?;
+            }
+            Ok(())
+        }
+        Command::Plugins => {
+            show_plugins(plugins_dir.as_ref()).await;
+            Ok(())
+        }
+        Command::List { folders } => {
+            print_tracks(&LocalSource::new(folders).tracks());
             Ok(())
         }
         Command::Search { query, folders } => {
-            let tracks = LocalSource::new(folders).search(&query).await?;
-            print_tracks(&tracks);
+            print_tracks(&LocalSource::new(folders).search(&query).await?);
             Ok(())
         }
     }
 }
 
-async fn play(inputs: Vec<String>, shuffle: bool, repeat: Repeat, volume: u8) -> Result<()> {
-    let tracks = collect_tracks(&inputs)?;
-    if tracks.is_empty() {
-        bail!("no playable audio found in the given inputs");
-    }
+/// `$XDG_DATA_HOME/veena/plugins`, falling back to `~/.local/share`.
+fn default_plugins_dir() -> Option<PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+        })?;
+    Some(data.join("veena/plugins"))
+}
 
-    let mut registry = SourceRegistry::new();
+/// Built-in sources plus every plugin that loads.
+async fn registry(plugins_dir: Option<&PathBuf>, report_failures: bool) -> SourceRegistry {
+    let registry = SourceRegistry::new();
     // Resolves any local path, so no folders need to be scanned up front.
     registry.register(Arc::new(LocalSource::default()));
     registry.register(Arc::new(UrlSource));
 
+    let Some(dir) = plugins_dir.filter(|d| d.is_dir()) else {
+        return registry;
+    };
+    match veena_plugin::load_dir(dir, &Options::default()).await {
+        Ok(plugins) => {
+            for (path, plugin) in plugins {
+                match plugin {
+                    Ok(plugin) => registry.register(Arc::new(plugin)),
+                    Err(e) if report_failures => {
+                        eprintln!("skipping plugin {}: {e}", path.display());
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        Err(e) => eprintln!("cannot read plugins in {}: {e}", dir.display()),
+    }
+    registry
+}
+
+async fn show_plugins(plugins_dir: Option<&PathBuf>) {
+    let Some(dir) = plugins_dir else {
+        println!("No plugin folder: set --plugins or VEENA_PLUGINS.");
+        return;
+    };
+    let plugins = match veena_plugin::load_dir(dir, &Options::default()).await {
+        Ok(plugins) => plugins,
+        Err(e) => {
+            println!("No plugins in {} ({e}).", dir.display());
+            return;
+        }
+    };
+    println!("Plugins in {}\n", dir.display());
+    if plugins.is_empty() {
+        println!("  none");
+    }
+    for (path, plugin) in &plugins {
+        let file = path.file_name().unwrap_or_default().to_string_lossy();
+        match plugin {
+            Ok(plugin) => {
+                let meta = plugin.meta();
+                println!("  {:<16} {} {}", meta.id, meta.name, meta.version);
+                println!(
+                    "  {:<16} {}  ·  can contact: {}",
+                    "",
+                    file,
+                    plugin.domains().join(", ")
+                );
+            }
+            Err(e) => println!("  {:<16} not loaded: {e}", file),
+        }
+    }
+}
+
+/// Search sources and print numbered results. Returns them in order.
+async fn find(
+    registry: &SourceRegistry,
+    query: &str,
+    only: Option<&str>,
+    limit: usize,
+) -> Result<Vec<Track>> {
+    let sources: Vec<_> = registry
+        .sources()
+        .into_iter()
+        .filter(|s| only.is_none_or(|id| s.id() == id))
+        // Local and URL sources need folders or links, not free-text search.
+        .filter(|s| only.is_some() || ![LocalSource::ID, UrlSource::ID].contains(&s.id()))
+        .collect();
+    if sources.is_empty() {
+        match only {
+            Some(id) => {
+                bail!("unknown source `{id}`; run `veena plugins` to see what is installed")
+            }
+            None => bail!(
+                "no plugins installed; add .js plugins to the plugin folder (see `veena plugins`)"
+            ),
+        }
+    }
+
+    let mut found = Vec::new();
+    for source in sources {
+        match source.search(query).await {
+            Ok(tracks) => {
+                println!(
+                    "{} · {} result{}",
+                    source.name(),
+                    tracks.len().min(limit),
+                    if tracks.len() == 1 { "" } else { "s" }
+                );
+                for track in tracks.into_iter().take(limit) {
+                    found.push(track);
+                    let track = found.last().expect("just pushed");
+                    let duration = track
+                        .duration
+                        .map(terminal::format_time)
+                        .unwrap_or_default();
+                    println!(
+                        "{:>4}.  {}  ·  {}  {duration}",
+                        found.len(),
+                        track.title,
+                        track.artist_or_unknown()
+                    );
+                    println!("       {}", track.id);
+                }
+            }
+            Err(e) => println!("{} · failed: {e}", source.name()),
+        }
+        println!();
+    }
+    Ok(found)
+}
+
+async fn play(registry: SourceRegistry, tracks: Vec<Track>, args: PlaybackArgs) -> Result<()> {
+    if tracks.is_empty() {
+        bail!("no playable audio found in the given inputs");
+    }
     let player = Player::new(registry).context("cannot start audio playback")?;
-    let volume = f32::from(volume) / 100.0;
+    let volume = f32::from(args.volume) / 100.0;
+    let repeat = args.repeat.into();
     player.set_volume(volume);
     player.set_repeat(repeat);
     player.enqueue(tracks);
-    player.set_shuffle(shuffle);
+    player.set_shuffle(args.shuffle);
     player.toggle_pause();
 
     terminal::run(
         &player,
         terminal::Settings {
             volume,
-            shuffle,
+            shuffle: args.shuffle,
             repeat,
         },
     )

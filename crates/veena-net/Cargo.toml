@@ -1,0 +1,8 @@
+[package]
+name = "veena-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ureq = "3.5.2"
