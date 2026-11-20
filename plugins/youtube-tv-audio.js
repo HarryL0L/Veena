@@ -12,7 +12,7 @@
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "0.1.0",
+  version: "0.2.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -140,12 +140,22 @@ async function getPlayer() {
   veena.log(`player ${id}: ran in ${Date.now() - started} ms`);
 
   const candidates = findFunctions(code);
-  const signature = pick(candidates.signature, lookup, isSignatureFunction);
-  const n = pick(candidates.n, lookup, isNFunction);
   veena.log(
-    `player ${id}: ${candidates.signature.length} signature and ${candidates.n.length} n candidates; ` +
-      `chose ${signature?.name ?? "none"} and ${n?.name ?? "none"}`,
+    `player ${id}: ${candidates.all.length} one-argument functions; ` +
+      `${candidates.signature.length} look like signature and ${candidates.n.length} like n functions`,
   );
+  let signature = pick("signature", candidates.signature, lookup, isSignatureFunction);
+  let n = pick("n", candidates.n, lookup, isNFunction);
+  // Fallback: test every function of a plausible size, within a time limit.
+  if (!signature) {
+    const small = candidates.all.filter((c) => c.length < 2500).map((c) => c.name);
+    signature = pick("signature (scan)", small, lookup, isSignatureFunction, 8000);
+  }
+  if (!n) {
+    const large = candidates.all.filter((c) => c.length > 1000).map((c) => c.name);
+    n = pick("n (scan)", large, lookup, isNFunction, 8000);
+  }
+  veena.log(`player ${id}: chose ${signature?.name ?? "none"} and ${n?.name ?? "none"}`);
   if (!signature) throw new Error(`player ${id}: signature function not found`);
   if (!n) throw new Error(`player ${id}: n function not found`);
 
@@ -230,29 +240,44 @@ function installBrowserStandIns() {
 }
 
 /**
- * Names of one-argument functions in the player code whose source looks
- * like a signature function (short, splits and joins characters) or an n
- * function (long, splits and joins).
+ * One-argument functions in the player code. Signature and n functions are
+ * recognised by how they start, which survives renaming and hidden method
+ * names: the signature function begins `a=a.split("")` (or `a=a[T[1]](..)`)
+ * and the n function begins `var b=a.split(..)` (or `var b=a[T[1]](..)`).
  */
 function findFunctions(code) {
+  const all = [];
   const signature = [];
   const n = [];
-  const pattern = /(?:^|[;,{}\s(])([A-Za-z_$][\w$]*)\s*=\s*function\(\s*[\w$]+\s*\)\s*\{|function\s+([A-Za-z_$][\w$]*)\(\s*[\w$]+\s*\)\s*\{/g;
-  for (const match of code.matchAll(pattern)) {
-    const name = match[1] ?? match[2];
-    const body = bodyAt(code, match.index + match[0].length - 1);
-    if (!body.includes("split") || !body.includes("join")) continue;
-    if (body.length < 3000) signature.push(name);
-    if (body.length > 600) n.push(name);
+  const header =
+    /(?:^|[;,{}\s(])([A-Za-z_$][\w$]*)\s*=\s*function\(\s*([\w$]+)\s*\)\s*\{|function\s+([A-Za-z_$][\w$]*)\(\s*([\w$]+)\s*\)\s*\{/g;
+  // `{a=a.split(` or `{a=a[`: the parameter split into itself.
+  const splitsSelf = /^\{\s*([\w$]+)\s*=\s*([\w$]+)\s*(?:\.split\b|\[)/;
+  // `{var b=a.split(` or `{var b=a[`: the parameter split into a variable.
+  const splitsIntoVar = /^\{\s*var\s+[\w$]+\s*=\s*([\w$]+)\s*(?:\.split\b|\[)/;
+  for (const match of code.matchAll(header)) {
+    const name = match[1] ?? match[3];
+    const param = match[2] ?? match[4];
+    // Measuring up to 3000 characters tells small from large; longer
+    // bodies count as large.
+    const body = bodyAt(code, match.index + match[0].length - 1, 3000);
+    all.push({ name, length: body.length });
+    const self = splitsSelf.exec(body);
+    const intoVar = splitsIntoVar.exec(body);
+    const wordy = body.includes("split") && body.includes("join");
+    if (body.length < 2500 && ((self && self[1] === param && self[2] === param) || (wordy && body.length < 600))) {
+      signature.push(name);
+    }
+    if (body.length > 600 && ((intoVar && intoVar[1] === param) || wordy)) n.push(name);
   }
-  return { signature, n };
+  return { all, signature, n };
 }
 
 /** The function body starting at the `{` at `open`, by brace matching. */
-function bodyAt(code, open) {
+function bodyAt(code, open, max) {
   let depth = 0;
   let quote = null;
-  const limit = Math.min(code.length, open + 200000);
+  const limit = Math.min(code.length, open + max);
   for (let i = open; i < limit; i++) {
     const c = code[i];
     if (quote) {
@@ -265,21 +290,40 @@ function bodyAt(code, open) {
   return code.slice(open, limit);
 }
 
-/** The first candidate that behaves as `test` expects. */
-function pick(names, lookup, test) {
+/**
+ * The first candidate that behaves as `test` expects. Logs why the first
+ * few candidates were rejected, to help when YouTube changes its code.
+ */
+function pick(kind, names, lookup, test, timeLimitMs = Infinity) {
+  const started = Date.now();
+  const rejections = [];
+  let tested = 0;
   for (const name of names) {
-    let fn;
-    try {
-      fn = lookup(name);
-    } catch {
-      continue;
+    if (Date.now() - started > timeLimitMs) {
+      veena.log(`${kind}: stopped after ${tested} of ${names.length} (time limit)`);
+      break;
     }
-    if (typeof fn !== "function") continue;
+    tested++;
+    let reason;
     try {
-      if (test(fn)) return { name, fn };
-    } catch {
-      // Not it.
+      const fn = lookup(name);
+      if (typeof fn !== "function") {
+        reason = `not a function (${typeof fn})`;
+      } else {
+        const verdict = test(fn);
+        if (verdict === true) {
+          veena.log(`${kind}: ${name} matches (tested ${tested})`);
+          return { name, fn };
+        }
+        reason = verdict;
+      }
+    } catch (e) {
+      reason = `threw ${String(e).slice(0, 80)}`;
     }
+    if (rejections.length < 5) rejections.push(`${name}: ${reason}`);
+  }
+  if (names.length > 0 && rejections.length > 0) {
+    veena.log(`${kind}: none of ${tested} matched; e.g. ${rejections.join(" | ")}`);
   }
   return undefined;
 }
@@ -290,20 +334,23 @@ const SAMPLE_N = "a1Bc2De3Fg4Hi5Jk";
 /** Shuffles a long string into a slightly shorter one of the same characters. */
 function isSignatureFunction(fn) {
   const out = fn(SAMPLE_SIGNATURE);
-  if (typeof out !== "string" || out === SAMPLE_SIGNATURE) return false;
-  if (out.length < 80 || out.length > SAMPLE_SIGNATURE.length) return false;
+  if (typeof out !== "string") return `returned ${typeof out}`;
+  if (out === SAMPLE_SIGNATURE) return "returned its input";
+  if (out.length < 80 || out.length > SAMPLE_SIGNATURE.length) return `returned length ${out.length}`;
   const pool = {};
   for (const c of SAMPLE_SIGNATURE) pool[c] = (pool[c] ?? 0) + 1;
-  for (const c of out) if (!pool[c]--) return false;
-  return fn(SAMPLE_SIGNATURE) === out;
+  for (const c of out) if (!pool[c]--) return `returned other characters: ${out.slice(0, 20)}`;
+  return fn(SAMPLE_SIGNATURE) === out ? true : "not repeatable";
 }
 
 /** Turns a short code into a different short code, the same way each time. */
 function isNFunction(fn) {
   const out = fn(SAMPLE_N);
-  if (typeof out !== "string" || out === SAMPLE_N) return false;
-  if (out.length < 8 || out.length > 40 || out.startsWith("enhanced_except")) return false;
-  return fn(SAMPLE_N) === out;
+  if (typeof out !== "string") return `returned ${typeof out}`;
+  if (out === SAMPLE_N) return "returned its input";
+  if (out.startsWith("enhanced_except")) return `reported failure: ${out.slice(0, 40)}`;
+  if (out.length < 8 || out.length > 40) return `returned length ${out.length}`;
+  return fn(SAMPLE_N) === out ? true : "not repeatable";
 }
 
 /** The n function reports failure by returning an error string. */
