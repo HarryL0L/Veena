@@ -73,14 +73,14 @@ impl AudioEngine {
         let thread = thread::Builder::new()
             .name("veena-audio".into())
             .spawn(move || {
-                let output = match OutputStreamBuilder::open_default_stream() {
+                let output = match open_output() {
                     Ok(mut output) => {
                         output.log_on_drop(false);
                         let _ = ready_tx.send(Ok(()));
                         output
                     }
                     Err(e) => {
-                        let _ = ready_tx.send(Err(AudioError::Output(e.to_string())));
+                        let _ = ready_tx.send(Err(e));
                         return;
                     }
                 };
@@ -135,6 +135,46 @@ impl Drop for AudioEngine {
             let _ = thread.join();
         }
     }
+}
+
+/// Open the default audio output.
+fn open_output() -> Result<OutputStream, AudioError> {
+    // Some platform audio code panics instead of returning an error; report
+    // that as an error too.
+    std::panic::catch_unwind(open_platform_output).unwrap_or_else(|panic| {
+        let message = panic
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown error".into());
+        Err(AudioError::Output(format!(
+            "audio system failed: {message}"
+        )))
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+fn open_platform_output() -> Result<OutputStream, AudioError> {
+    OutputStreamBuilder::open_default_stream().map_err(|e| AudioError::Output(e.to_string()))
+}
+
+/// On Android, asking the device for its preferred format goes through
+/// Java, which needs an app context (missing in Termux, and only set up
+/// later in the app). Playback itself does not, so open the output with a
+/// standard format; AAudio converts it for the device.
+#[cfg(target_os = "android")]
+fn open_platform_output() -> Result<OutputStream, AudioError> {
+    use rodio::cpal::traits::HostTrait;
+
+    let device = rodio::cpal::default_host()
+        .default_output_device()
+        .ok_or_else(|| AudioError::Output("no audio output device".into()))?;
+    OutputStreamBuilder::default()
+        .with_device(device)
+        .with_sample_rate(48_000)
+        .with_channels(2)
+        .open_stream()
+        .map_err(|e| AudioError::Output(e.to_string()))
 }
 
 /// State owned by the audio thread.
