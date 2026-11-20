@@ -27,6 +27,11 @@ struct Cli {
     #[arg(short, long, global = true)]
     verbose: bool,
 
+    /// Setting passed to plugins as `veena.config.KEY`. VALUE is JSON, or
+    /// plain text. Repeatable, e.g. `--config region=IN`.
+    #[arg(long = "config", global = true, value_name = "KEY=VALUE")]
+    config: Vec<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -128,10 +133,11 @@ async fn main() -> Result<()> {
         log::set_max_level(log::LevelFilter::Debug);
     }
     let plugins_dir = cli.plugins.or_else(default_plugins_dir);
+    let options = plugin_options(&cli.config)?;
     match cli.command {
         Command::Play { inputs, playback } => {
             let tracks = collect_tracks(&inputs)?;
-            let registry = registry(plugins_dir.as_ref(), false).await;
+            let registry = registry(plugins_dir.as_ref(), &options, false).await;
             play(registry, tracks, playback).await
         }
         Command::Find {
@@ -141,7 +147,7 @@ async fn main() -> Result<()> {
             play: should_play,
             playback,
         } => {
-            let registry = registry(plugins_dir.as_ref(), true).await;
+            let registry = registry(plugins_dir.as_ref(), &options, true).await;
             let tracks = find(&registry, &query, source.as_deref(), limit).await?;
             if should_play && !tracks.is_empty() {
                 play(registry, tracks, playback).await?;
@@ -154,7 +160,7 @@ async fn main() -> Result<()> {
             play: should_play,
             playback,
         } => {
-            let registry = registry(plugins_dir.as_ref(), true).await;
+            let registry = registry(plugins_dir.as_ref(), &options, true).await;
             let Some(provider) = registry.catalog(&source) else {
                 bail!("no catalog `{source}`; run `veena plugins` to see what is installed");
             };
@@ -166,11 +172,11 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Plugins => {
-            show_plugins(plugins_dir.as_ref()).await;
+            show_plugins(plugins_dir.as_ref(), &options).await;
             Ok(())
         }
         Command::Resolve { track } => {
-            let registry = registry(plugins_dir.as_ref(), true).await;
+            let registry = registry(plugins_dir.as_ref(), &options, true).await;
             resolve(&registry, &track).await
         }
         Command::List { folders } => {
@@ -184,6 +190,22 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Plugin options from `--config KEY=VALUE` arguments.
+fn plugin_options(settings: &[String]) -> Result<Options> {
+    let mut config = serde_json::Map::new();
+    for setting in settings {
+        let Some((key, value)) = setting.split_once('=') else {
+            bail!("--config expects KEY=VALUE, got `{setting}`");
+        };
+        let value = serde_json::from_str(value).unwrap_or_else(|_| value.into());
+        config.insert(key.trim().to_owned(), value);
+    }
+    Ok(Options {
+        config,
+        ..Options::default()
+    })
+}
+
 /// `$XDG_DATA_HOME/veena/plugins`, falling back to `~/.local/share`.
 fn default_plugins_dir() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
@@ -195,7 +217,11 @@ fn default_plugins_dir() -> Option<PathBuf> {
 }
 
 /// Built-in bricks plus every plugin that loads.
-async fn registry(plugins_dir: Option<&PathBuf>, report_failures: bool) -> SourceRegistry {
+async fn registry(
+    plugins_dir: Option<&PathBuf>,
+    options: &Options,
+    report_failures: bool,
+) -> SourceRegistry {
     let registry = SourceRegistry::new();
     // Plays any local path, so no folders need to be scanned up front.
     registry.add_resolver(Arc::new(LocalSource::default()));
@@ -204,7 +230,7 @@ async fn registry(plugins_dir: Option<&PathBuf>, report_failures: bool) -> Sourc
     let Some(dir) = plugins_dir.filter(|d| d.is_dir()) else {
         return registry;
     };
-    match veena_plugin::load_dir(dir, &Options::default()).await {
+    match veena_plugin::load_dir(dir, options).await {
         Ok(plugins) => {
             for (path, plugin) in plugins {
                 match plugin {
@@ -334,12 +360,12 @@ impl log::Log for StderrLogger {
     fn flush(&self) {}
 }
 
-async fn show_plugins(plugins_dir: Option<&PathBuf>) {
+async fn show_plugins(plugins_dir: Option<&PathBuf>, options: &Options) {
     let Some(dir) = plugins_dir else {
         println!("No plugin folder: set --plugins or VEENA_PLUGINS.");
         return;
     };
-    let plugins = match veena_plugin::load_dir(dir, &Options::default()).await {
+    let plugins = match veena_plugin::load_dir(dir, options).await {
         Ok(plugins) => plugins,
         Err(e) => {
             println!("No plugins in {} ({e}).", dir.display());

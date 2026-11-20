@@ -74,7 +74,17 @@ fn serve(seen: Arc<Mutex<Seen>>) -> String {
 
             let (content_type, body) = respond(&request, &seen, &stream_base);
             // Like YouTube refusing links that need a token.
-            let status = if request.path.starts_with("/forbidden") {
+            let range_start: u64 = request
+                .header("range")
+                .trim_start_matches("bytes=")
+                .split('-')
+                .next()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            // `/firstmb` links only serve the start of the file.
+            let status = if request.path.starts_with("/forbidden")
+                || (request.path.starts_with("/firstmb") && range_start > 1_000_000)
+            {
                 "403 Forbidden"
             } else {
                 "200 OK"
@@ -133,6 +143,13 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
                     "playabilityStatus": {"status": "OK"},
                     "streamingData": {"adaptiveFormats": [
                         {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000, "url": format!("{base}/forbidden")},
+                    ]}
+                })
+            } else if video == "firstmb" {
+                json!({
+                    "playabilityStatus": {"status": "OK"},
+                    "streamingData": {"adaptiveFormats": [
+                        {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000, "contentLength": "5000000", "url": format!("{base}/firstmb")},
                     ]}
                 })
             } else if video == "opus-only" {
@@ -207,6 +224,14 @@ fn search_response() -> Value {
         ]}}
     ]}}}}]}}})
 }
+
+/// The app types youtube-audio.js tries, in order.
+const CLIENTS: [&str; 4] = [
+    "ANDROID_VR 1.65.10",
+    "ANDROID_VR 1.62.27",
+    "ANDROID_VR 1.60.19",
+    "IOS 20.10.4",
+];
 
 fn plugin_path(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -308,10 +333,19 @@ async fn audio_links_fall_back_and_pick_aac() {
     // Links that are refused on download are skipped, not returned.
     let denied = Track::new(TrackId::new("youtube", "denied"), "x");
     let error = audio.resolve(&denied).await.unwrap_err().to_string();
-    for client in ["ANDROID_VR", "IOS"] {
-        let expected = format!("{client}: links refused when downloading (status 403)");
+    for client in CLIENTS {
+        let expected =
+            format!("{client}: links refused when downloading (status 403 at the start)");
         assert!(error.contains(&expected), "{error}");
     }
+
+    // Links that only serve the first megabyte are caught too.
+    let first_mb = Track::new(TrackId::new("youtube", "firstmb"), "x");
+    let error = audio.resolve(&first_mb).await.unwrap_err().to_string();
+    assert!(
+        error.contains("IOS 20.10.4: links refused when downloading (status 403 at the end)"),
+        "{error}"
+    );
 
     let opus = Track::new(TrackId::new("youtube", "opus-only"), "x");
     let error = audio.resolve(&opus).await.unwrap_err().to_string();
@@ -322,7 +356,7 @@ async fn audio_links_fall_back_and_pick_aac() {
 
     let blocked = Track::new(TrackId::new("youtube", "blocked"), "x");
     let error = audio.resolve(&blocked).await.unwrap_err().to_string();
-    for client in ["ANDROID_VR", "IOS"] {
+    for client in CLIENTS {
         let expected = format!("{client}: UNPLAYABLE: Video unavailable");
         assert!(error.contains(&expected), "{error}");
     }

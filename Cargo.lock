@@ -2346,6 +2346,7 @@ dependencies = [
  "clap",
  "crossterm",
  "log",
+ "serde_json",
  "tokio",
  "veena-audio",
  "veena-core",

@@ -10,7 +10,7 @@
 export const meta = {
   id: "youtube-audio",
   name: "YouTube audio",
-  version: "0.3.0",
+  version: "0.4.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -18,17 +18,28 @@ export const meta = {
 
 const BASE = veena.config.baseUrl ?? "https://www.youtube.com";
 
-/** App types to ask as, in order. Each returns direct links when it works. */
-const DEFAULT_CLIENTS = [
-  {
+/** An Oculus Quest YouTube app of a given version. */
+function questApp(version) {
+  return {
     name: "ANDROID_VR",
     id: 28,
-    version: "1.60.19",
-    userAgent:
-      "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+    version,
+    userAgent: `com.google.android.apps.youtube.vr.oculus/${version} (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip`,
     extra: { deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L" },
-  },
+  };
+}
+
+/**
+ * App types to ask as, in order. Each returns direct links when it works.
+ * Newer app versions first: YouTube distrusts old ones over time.
+ */
+const DEFAULT_CLIENTS = [
+  questApp("1.65.10"),
+  questApp("1.62.27"),
+  questApp("1.60.19"),
   {
+    // Links from this app type often need a token past the first megabyte;
+    // the download check below catches that.
     name: "IOS",
     id: 5,
     version: "20.10.4",
@@ -41,17 +52,19 @@ export async function resolve(track) {
   const clients = veena.config.clients ?? DEFAULT_CLIENTS;
   const problems = [];
   for (const client of clients) {
+    const label = `${client.name} ${client.version}`;
     try {
       const streams = await streamsFrom(client, track.id);
-      // YouTube can hand out links it then refuses to serve, so check one.
-      const status = await probe(streams[0]);
-      if (status === 200 || status === 206) {
-        veena.log(`${client.name}: links work`);
-        return streams;
+      // YouTube can hand out links it then refuses to serve, sometimes only
+      // after the first megabyte, so check the start and the end.
+      const failure = await probe(streams[0]);
+      if (!failure) {
+        veena.log(`${label}: links work`);
+        return streams.map(({ size, ...stream }) => stream);
       }
-      throw new Error(`links refused when downloading (status ${status})`);
+      throw new Error(`links refused when downloading ${failure}`);
     } catch (e) {
-      const problem = `${client.name}: ${e.message ?? e}`;
+      const problem = `${label}: ${e.message ?? e}`;
       veena.log(problem);
       problems.push(problem);
     }
@@ -59,12 +72,22 @@ export async function resolve(track) {
   throw new Error(problems.join("; "));
 }
 
-/** Download the first two bytes of a stream; returns the HTTP status. */
+/**
+ * Download two bytes at the start of a stream and, when its size is known,
+ * two near the end. Returns a description of the first failure, or nothing.
+ */
 async function probe(stream) {
-  const res = await veena.http.fetch(stream.url, {
-    headers: { ...stream.headers, Range: "bytes=0-1" },
-  });
-  return res.status;
+  const offsets = [0];
+  if (stream.size > 2_000_000) offsets.push(stream.size - 2);
+  for (const offset of offsets) {
+    const res = await veena.http.fetch(stream.url, {
+      headers: { ...stream.headers, Range: `bytes=${offset}-${offset + 1}` },
+    });
+    if (res.status !== 200 && res.status !== 206) {
+      return `(status ${res.status} at ${offset === 0 ? "the start" : "the end"})`;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -81,6 +104,7 @@ async function visitorData() {
     });
     const match = /"VISITOR_DATA":"([^"]+)"/.exec(res.text);
     if (match) {
+      veena.log("visitor id found");
       veena.cache.set("visitor", match[1], 6 * 3600);
       return match[1];
     }
@@ -135,6 +159,7 @@ async function streamsFrom(client, videoId) {
       url: f.url,
       mime: "audio/mp4",
       bitrate: f.averageBitrate ?? f.bitrate,
+      size: Number(f.contentLength) || undefined,
       // Streams are checked against the app type that requested them.
       headers: { "User-Agent": client.userAgent },
     }));
