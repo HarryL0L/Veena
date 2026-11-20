@@ -84,6 +84,10 @@ enum Command {
         /// the file, to find out exactly what the server allows.
         #[arg(long)]
         deep: bool,
+        /// Use only this audio-link brick instead of trying each in turn,
+        /// e.g. `youtube-tv-audio`.
+        #[arg(long, value_name = "BRICK")]
+        with: Option<String>,
     },
     /// List the music found in folders.
     List {
@@ -179,8 +183,19 @@ async fn main() -> Result<()> {
             show_plugins(plugins_dir.as_ref(), &options).await;
             Ok(())
         }
-        Command::Resolve { track, deep } => {
+        Command::Resolve { track, deep, with } => {
             let registry = registry(plugins_dir.as_ref(), &options, true).await;
+            if let Some(only) = &with {
+                // Leave only the chosen brick in the audio-link slot.
+                for resolver in registry.resolvers() {
+                    if resolver.id() != only {
+                        registry.remove_resolver(resolver.id());
+                    }
+                }
+                if registry.resolvers().is_empty() {
+                    bail!("no audio-link brick `{only}`; run `veena plugins`");
+                }
+            }
             resolve(&registry, &track, deep).await
         }
         Command::List { folders } => {

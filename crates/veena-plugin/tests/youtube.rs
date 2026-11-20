@@ -82,7 +82,9 @@ fn serve(seen: Arc<Mutex<Seen>>) -> String {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0);
             // `/firstmb` links only serve the start of the file.
+            let tv_refused = request.path.starts_with("/tvstream") && !tv_link_valid(&request.path);
             let status = if request.path.starts_with("/forbidden")
+                || tv_refused
                 || (request.path.starts_with("/firstmb") && range_start > 1_000_000)
             {
                 "403 Forbidden"
@@ -128,6 +130,33 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
                 ]}}
             ]}}}}
         }).to_string()),
+        ("GET", "/iframe_api") => (
+            "text/javascript",
+            r"var scriptUrl = 'https:\/\/www.youtube.com\/s\/player\/0123abcd\/www-widgetapi.vflset\/www-widgetapi.js';".into(),
+        ),
+        ("GET", "/s/player/0123abcd/player_ias.vflset/en_US/base.js") => {
+            ("text/javascript", FAKE_PLAYER.into())
+        }
+        ("POST", "/youtubei/v1/player") if request.header("user-agent").contains("Cobalt") => {
+            let body: Value = serde_json::from_str(&request.body).unwrap();
+            let sts = &body["playbackContext"]["contentPlaybackContext"]["signatureTimestamp"];
+            let response = if sts != 20123 {
+                json!({"playabilityStatus": {"status": "UNPLAYABLE", "reason": format!("bad signature timestamp {sts}")}})
+            } else {
+                let stream = format!("{base}/tvstream?id=hi&n={SCRAMBLED_N}");
+                json!({
+                    "playabilityStatus": {"status": "OK"},
+                    "streamingData": {"adaptiveFormats": [
+                        {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000, "contentLength": "5000000",
+                         "signatureCipher": format!("s={}&sp=sig&url={}", SCRAMBLED_SIGNATURE, percent_encode(&stream))},
+                        {"itag": 139, "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"", "bitrate": 50000, "contentLength": "2000000",
+                         "url": format!("{base}/tvstream?id=lo&n={SCRAMBLED_N}")},
+                        {"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 160000, "url": format!("{base}/opus")},
+                    ]}
+                })
+            };
+            ("application/json", response.to_string())
+        }
         ("POST", "/youtubei/v1/player") => {
             let body: Value = serde_json::from_str(&request.body).unwrap();
             let video = body["videoId"].as_str().unwrap_or_default();
@@ -223,6 +252,92 @@ fn search_response() -> Value {
             json!({"musicResponsiveListItemRenderer": {"flexColumns": []}}),
         ]}}
     ]}}}}]}}})
+}
+
+/// A cut-down imitation of YouTube's base.js: the signature function uses
+/// helper steps in an object, a decoy looks similar but changes nothing,
+/// the n function is long, and setup code fails without a real page.
+const FAKE_PLAYER: &str = r#"var _yt_player={};(function(g){var window=this;
+var Zq={Ab:function(a,b){a.splice(0,b)},Cd:function(a){a.reverse()},Ef:function(a,b){var c=a[0];a[0]=a[b%a.length];a[b%a.length]=c}};
+var Decoy=function(a){a=a.split("");return a.join("")};
+var Sig=function(a){a=a.split("");Zq.Cd(a,7);Zq.Ab(a,3);Zq.Ef(a,40);return a.join("")};
+var Nfn=function(a){var b=a.split(""),c=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180];
+try{for(var i=0;i<b.length;i++){b[i]=String.fromCharCode((b[i].charCodeAt(0)-48+7)%75+48)}b.reverse()}catch(d){return"enhanced_except_"+a}return b.join("")};
+var cfg={signatureTimestamp:20123,flags:{}};
+document.createElement("video").canPlayType("audio/mp4");
+navigator.mediaDevices.enumerateDevices().then(function(){});
+throw new Error("needs a real page");
+})(_yt_player);
+"#;
+
+const SCRAMBLED_SIGNATURE: &str = "AOq0QJ8wRAIgXmPlOPSBkkUs1bYFYlJCfe29xxLTnR1o6ZK7Vb1m1q4CIGR5Iu0ADBc0bMgDGNIq6GvdhZkTHvXlrrjZOq9Ki7Vfxyz";
+const SCRAMBLED_N: &str = "q8Lm3Nz5Rt7Wb9Yc";
+
+/// What the fake player's signature function computes.
+fn expected_signature(s: &str) -> String {
+    let mut a: Vec<char> = s.chars().collect();
+    a.reverse();
+    a.drain(..3);
+    let len = a.len();
+    a.swap(0, 40 % len);
+    a.into_iter().collect()
+}
+
+/// What the fake player's n function computes.
+fn expected_n(n: &str) -> String {
+    let mut out: Vec<char> = n
+        .chars()
+        .map(|c| char::from_u32((c as u32 - 48 + 7) % 75 + 48).unwrap())
+        .collect();
+    out.reverse();
+    out.into_iter().collect()
+}
+
+/// A `/tvstream` link is valid only with the right n, and the right
+/// signature when one is present.
+fn tv_link_valid(path: &str) -> bool {
+    let query = path.split_once('?').map(|(_, q)| q).unwrap_or_default();
+    let param = |name: &str| {
+        query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+            .map(percent_decode)
+    };
+    let n_ok = param("n").as_deref() == Some(expected_n(SCRAMBLED_N).as_str());
+    let sig_ok = match param("id").as_deref() {
+        Some("hi") => {
+            param("sig").as_deref() == Some(expected_signature(SCRAMBLED_SIGNATURE).as_str())
+        }
+        _ => true,
+    };
+    n_ok && sig_ok
+}
+
+fn percent_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).unwrap());
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap()
 }
 
 /// The app types youtube-audio.js tries, in order.
@@ -389,4 +504,35 @@ async fn falls_back_when_the_first_app_type_is_refused() {
         }
         other => panic!("unexpected {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn tv_brick_solves_the_player_puzzles() {
+    let base = serve(Arc::default());
+    let tv = load("youtube-tv-audio.js", &base).await;
+    assert!(tv.is_resolver() && !tv.is_catalog());
+
+    let track = Track::new(TrackId::new("youtube", "vid1"), "Doodle");
+    let streams = tv.resolve(&track).await.unwrap();
+    assert_eq!(streams.len(), 2, "AAC only: {streams:#?}");
+    let StreamLocation::Http { url, headers } = &streams[0].location else {
+        panic!("unexpected {:?}", streams[0].location);
+    };
+    let path = url.strip_prefix(&base).unwrap();
+    assert!(tv_link_valid(path), "signature and n unscrambled: {url}");
+    assert!(
+        headers
+            .iter()
+            .any(|(k, v)| k == "User-Agent" && v.contains("Cobalt"))
+    );
+    let StreamLocation::Http { url, .. } = &streams[1].location else {
+        panic!()
+    };
+    assert!(
+        tv_link_valid(url.strip_prefix(&base).unwrap()),
+        "n unscrambled: {url}"
+    );
+
+    // The solved player is reused for the next track.
+    assert_eq!(tv.resolve(&track).await.unwrap().len(), 2);
 }

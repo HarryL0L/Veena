@@ -128,9 +128,11 @@ Memory use is not limited yet. Plugins are trusted code: in a later release ever
 | `archive-org.js` | Internet Archive: free and public-domain audio. Search + audio links. |
 | `youtube-music.js` | YouTube Music songs, albums and playlists. Search only; labels tracks `youtube`. |
 | `youtube-audio.js` | Audio links for `youtube` tracks (AAC). Tries several YouTube app types in turn. |
+| `youtube-tv-audio.js` | Audio links for `youtube` tracks via the TV app type. Runs YouTube's player code to solve its scrambling. |
 
 Test an audio-link brick without playing:
 
 ```sh
 veena --plugins ./plugins --verbose resolve youtube:<video-id>
+veena --plugins ./plugins --verbose resolve --with youtube-tv-audio youtube:<video-id>
 ```
