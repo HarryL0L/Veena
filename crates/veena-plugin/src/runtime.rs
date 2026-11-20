@@ -15,6 +15,12 @@ use tokio::sync::oneshot;
 use crate::host::{self, HOST, HostState};
 use crate::{Options, PluginError, PluginMeta};
 
+/// Stack for plugin threads. The JavaScript engine uses the native stack
+/// for each nested call, and running out aborts the whole app, so this must
+/// comfortably hold `Limits::recursion` nested calls. Only the memory
+/// actually used is committed.
+const PLUGIN_STACK_BYTES: usize = 64 * 1024 * 1024;
+
 /// Which slots a plugin fills, from its exports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slots {
@@ -39,6 +45,7 @@ pub fn spawn(
     let (jobs_tx, jobs_rx) = mpsc::channel::<Job>();
     thread::Builder::new()
         .name("veena-plugin".into())
+        .stack_size(PLUGIN_STACK_BYTES)
         .spawn(move || {
             let mut runtime = match Runtime::new(&code, &options) {
                 Ok(runtime) => runtime,
@@ -150,7 +157,7 @@ impl Runtime {
 
         let mut result = callable
             .call(&JsValue::undefined(), &args, context)
-            .map_err(|e| PluginError::Script(e.to_string()))?;
+            .map_err(|e| PluginError::Script(concise(&e.to_string())))?;
         if let Some(promise) = result
             .as_object()
             .and_then(|o| JsPromise::from_object(o).ok())
@@ -165,12 +172,17 @@ impl Runtime {
     }
 }
 
+/// Keep the message and the first stack frames of an error.
+fn concise(message: &str) -> String {
+    message.lines().take(4).collect::<Vec<_>>().join("\n")
+}
+
 /// Run pending jobs until the promise settles; return its value.
 fn settle(promise: &JsPromise, context: &mut Context) -> Result<JsValue, String> {
-    context.run_jobs().map_err(|e| e.to_string())?;
+    context.run_jobs().map_err(|e| concise(&e.to_string()))?;
     match promise.state() {
         PromiseState::Fulfilled(value) => Ok(value),
-        PromiseState::Rejected(reason) => Err(describe(&reason, context)),
+        PromiseState::Rejected(reason) => Err(concise(&describe(&reason, context))),
         PromiseState::Pending => Err("promise never settled".into()),
     }
 }

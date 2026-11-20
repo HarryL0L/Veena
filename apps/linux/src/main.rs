@@ -23,6 +23,10 @@ struct Cli {
     #[arg(long, global = true, env = "VEENA_PLUGINS")]
     plugins: Option<PathBuf>,
 
+    /// Show log messages, including plugin `console.log` output.
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -66,6 +70,12 @@ enum Command {
     },
     /// Show installed bricks (plugins).
     Plugins,
+    /// Get a track's audio link and check that it downloads, without playing.
+    /// Useful for testing audio-link bricks.
+    Resolve {
+        /// Track as `kind:id`, e.g. `youtube:dQw4w9WgXcQ`.
+        track: String,
+    },
     /// List the music found in folders.
     List {
         #[arg(required = true)]
@@ -113,6 +123,10 @@ impl From<RepeatArg> for Repeat {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    if cli.verbose {
+        log::set_logger(&STDERR_LOGGER).ok();
+        log::set_max_level(log::LevelFilter::Debug);
+    }
     let plugins_dir = cli.plugins.or_else(default_plugins_dir);
     match cli.command {
         Command::Play { inputs, playback } => {
@@ -154,6 +168,10 @@ async fn main() -> Result<()> {
         Command::Plugins => {
             show_plugins(plugins_dir.as_ref()).await;
             Ok(())
+        }
+        Command::Resolve { track } => {
+            let registry = registry(plugins_dir.as_ref(), true).await;
+            resolve(&registry, &track).await
         }
         Command::List { folders } => {
             print_tracks(&LocalSource::new(folders).tracks());
@@ -201,6 +219,116 @@ async fn registry(plugins_dir: Option<&PathBuf>, report_failures: bool) -> Sourc
         Err(e) => eprintln!("cannot read plugins in {}: {e}", dir.display()),
     }
     registry
+}
+
+/// Resolve a track and download the start and middle of its first stream.
+async fn resolve(registry: &SourceRegistry, input: &str) -> Result<()> {
+    let Some((kind, id)) = input.split_once(':') else {
+        bail!("expected `kind:id`, e.g. `youtube:dQw4w9WgXcQ`");
+    };
+    let names: Vec<String> = registry
+        .resolvers_for(kind)
+        .iter()
+        .map(|r| r.id().to_owned())
+        .collect();
+    if names.is_empty() {
+        bail!("no audio-link brick handles `{kind}` tracks; run `veena plugins`");
+    }
+    println!("Trying: {}", names.join(" → "));
+
+    let track = Track::new(veena_core::TrackId::new(kind, id), id);
+    let started = std::time::Instant::now();
+    let streams = registry.resolve(&track).await?;
+    println!(
+        "Resolved in {:.1}s, {} stream(s):",
+        started.elapsed().as_secs_f32(),
+        streams.len()
+    );
+    for stream in &streams {
+        let bitrate = stream
+            .bitrate
+            .map(|b| format!("{} kbps", b / 1000))
+            .unwrap_or_default();
+        let place = match &stream.location {
+            veena_core::StreamLocation::Http { url, .. } => {
+                url.split('?').next().unwrap_or(url).to_owned()
+            }
+            veena_core::StreamLocation::File(path) => path.display().to_string(),
+        };
+        println!(
+            "  {}  {bitrate}  {place}",
+            stream.mime.as_deref().unwrap_or("?")
+        );
+    }
+
+    let veena_core::StreamLocation::Http { url, headers } = streams[0].location.clone() else {
+        return Ok(());
+    };
+    println!("Checking the first stream downloads...");
+    let report = tokio::task::spawn_blocking(move || probe(&url, &headers)).await?;
+    match report {
+        Ok(lines) => lines.iter().for_each(|line| println!("  {line}")),
+        Err(e) => bail!("download failed: {e}"),
+    }
+    Ok(())
+}
+
+/// Read the start of a stream, then jump to the middle and read again.
+fn probe(url: &str, headers: &[(String, String)]) -> std::io::Result<Vec<String>> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let started = std::time::Instant::now();
+    let mut reader = veena_audio::HttpReader::open(url, headers)?;
+    let mut lines = vec![format!(
+        "type {}, size {}, seeking {}",
+        reader.content_type().unwrap_or("unknown"),
+        reader
+            .byte_len()
+            .map(|b| format!("{:.1} MB", b as f64 / 1e6))
+            .unwrap_or_else(|| "unknown".into()),
+        if reader.is_seekable() {
+            "supported"
+        } else {
+            "not supported"
+        },
+    )];
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut read = 0;
+    while read < buf.len() {
+        match reader.read(&mut buf[read..])? {
+            0 => break,
+            n => read += n,
+        }
+    }
+    let secs = started.elapsed().as_secs_f64();
+    lines.push(format!(
+        "start: {} KB in {secs:.1}s ({:.0} KB/s)",
+        read / 1024,
+        read as f64 / 1024.0 / secs
+    ));
+    if let (true, Some(len)) = (reader.is_seekable(), reader.byte_len()) {
+        reader.seek(SeekFrom::Start(len / 2))?;
+        let n = reader.read(&mut buf[..16 * 1024])?;
+        lines.push(format!("middle: {} KB read after seeking", n / 1024));
+    }
+    Ok(lines)
+}
+
+/// Prints log messages to stderr (enabled with `--verbose`).
+struct StderrLogger;
+
+static STDERR_LOGGER: StderrLogger = StderrLogger;
+
+impl log::Log for StderrLogger {
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        eprintln!("[{}] {}", record.level(), record.args());
+    }
+
+    fn flush(&self) {}
 }
 
 async fn show_plugins(plugins_dir: Option<&PathBuf>) {

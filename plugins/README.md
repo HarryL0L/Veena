@@ -114,6 +114,7 @@ Browser APIs such as `URL`, `URLSearchParams` and `setTimeout` are not.
 | Load time | Network access is blocked while the file first runs. |
 | Time | 30 seconds per call. A plugin that stops responding is restarted. |
 | Loops | 10 million iterations per loop. |
+| Recursion | 400 nested calls; exceeding it is an error, never a crash. |
 | Requests | 32 per call, 16 MB per response, 20 seconds each. |
 
 Memory use is not limited yet. Plugins are trusted code: in a later release every plugin will be signed, and Veena will refuse plugins without a valid signature.
@@ -125,3 +126,11 @@ Memory use is not limited yet. Plugins are trusted code: in a later release ever
 | File | Source |
 |---|---|
 | `archive-org.js` | Internet Archive: free and public-domain audio. Search + audio links. |
+| `youtube-music.js` | YouTube Music songs, albums and playlists. Search only; labels tracks `youtube`. |
+| `youtube-audio.js` | Audio links for `youtube` tracks (AAC). Tries several YouTube app types in turn. |
+
+Test an audio-link brick without playing:
+
+```sh
+veena --plugins ./plugins --verbose resolve youtube:<video-id>
+```

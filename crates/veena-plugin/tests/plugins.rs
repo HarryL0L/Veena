@@ -87,6 +87,8 @@ export async function playlist(id) {{
   if (id === "config") {{ return [{{ id: veena.config.client, title: String(veena.apiVersion) }}]; }}
   if (id === "throw") throw new TypeError("boom");
   if (id === "loop") {{ while (true) {{}} }}
+  if (id === "recurse") {{ const f = (n) => f(n + 1) + 1; return f(0); }}
+  if (id === "deep-json") {{ let v = {{}}; for (let i = 0; i < 150; i++) v = {{ a: [v] }}; const walk = (n) => {{ if (n && typeof n === "object") for (const k in n) walk(n[k]); }}; walk(v); return []; }}
   if (id === "bad-stream") return [{{ id: 1 }}];
   if (id === "fraction") return [{{ id: "f", title: "f", durationMs: 1500.7 }}];
   return [];
@@ -212,6 +214,15 @@ async fn cache_config_and_errors() {
     );
     let fraction = plugin.playlist("fraction").await.unwrap();
     assert_eq!(fraction[0].duration.map(|d| d.as_millis()), Some(1500));
+
+    // Endless recursion is an error, not a crash; deep data is fine.
+    let recursed = playlist_error(&plugin, "recurse").await;
+    assert!(recursed.contains("recursive calls"), "{recursed}");
+    assert!(
+        recursed.lines().count() <= 4,
+        "trace is trimmed: {recursed}"
+    );
+    assert!(plugin.playlist("deep-json").await.unwrap().is_empty());
 
     // An endless loop is stopped by the loop limit; the plugin keeps working.
     let looped = playlist_error(&plugin, "loop").await;
