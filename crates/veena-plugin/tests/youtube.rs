@@ -343,7 +343,7 @@ async fn audio_links_fall_back_and_pick_aac() {
     let first_mb = Track::new(TrackId::new("youtube", "firstmb"), "x");
     let error = audio.resolve(&first_mb).await.unwrap_err().to_string();
     assert!(
-        error.contains("IOS 20.10.4: links refused when downloading (status 403 at the end)"),
+        error.contains("IOS 20.10.4: links refused when downloading (status 403 past the first megabyte; YouTube wants a proof-of-origin token)"),
         "{error}"
     );
 

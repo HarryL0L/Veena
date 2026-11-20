@@ -10,7 +10,7 @@
 export const meta = {
   id: "youtube-audio",
   name: "YouTube audio",
-  version: "0.4.0",
+  version: "0.5.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -72,19 +72,26 @@ export async function resolve(track) {
   throw new Error(problems.join("; "));
 }
 
+/** Links without a proof-of-origin token stop working after this point. */
+const TOKEN_FREE_LIMIT = 1024 * 1024;
+
 /**
- * Download two bytes at the start of a stream and, when its size is known,
- * two near the end. Returns a description of the first failure, or nothing.
+ * Download two bytes at the start of a stream and, when the file is bigger
+ * than 1 MB, two just past the first megabyte and two at the end. Returns a
+ * description of the first failure, or nothing.
  */
 async function probe(stream) {
-  const offsets = [0];
-  if (stream.size > 2_000_000) offsets.push(stream.size - 2);
-  for (const offset of offsets) {
+  const checks = [[0, "at the start"]];
+  if (stream.size > TOKEN_FREE_LIMIT + 2) {
+    checks.push([TOKEN_FREE_LIMIT, "past the first megabyte; YouTube wants a proof-of-origin token"]);
+    checks.push([stream.size - 2, "at the end"]);
+  }
+  for (const [offset, where] of checks) {
     const res = await veena.http.fetch(stream.url, {
       headers: { ...stream.headers, Range: `bytes=${offset}-${offset + 1}` },
     });
     if (res.status !== 200 && res.status !== 206) {
-      return `(status ${res.status} at ${offset === 0 ? "the start" : "the end"})`;
+      return `(status ${res.status} ${where})`;
     }
   }
   return undefined;
