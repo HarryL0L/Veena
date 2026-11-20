@@ -80,6 +80,10 @@ enum Command {
     Resolve {
         /// Track as `kind:id`, e.g. `youtube:dQw4w9WgXcQ`.
         track: String,
+        /// Also download the stream piece by piece and test the end of
+        /// the file, to find out exactly what the server allows.
+        #[arg(long)]
+        deep: bool,
     },
     /// List the music found in folders.
     List {
@@ -175,9 +179,9 @@ async fn main() -> Result<()> {
             show_plugins(plugins_dir.as_ref(), &options).await;
             Ok(())
         }
-        Command::Resolve { track } => {
+        Command::Resolve { track, deep } => {
             let registry = registry(plugins_dir.as_ref(), &options, true).await;
-            resolve(&registry, &track).await
+            resolve(&registry, &track, deep).await
         }
         Command::List { folders } => {
             print_tracks(&LocalSource::new(folders).tracks());
@@ -248,7 +252,7 @@ async fn registry(
 }
 
 /// Resolve a track and download the start and middle of its first stream.
-async fn resolve(registry: &SourceRegistry, input: &str) -> Result<()> {
+async fn resolve(registry: &SourceRegistry, input: &str, deep: bool) -> Result<()> {
     let Some((kind, id)) = input.split_once(':') else {
         bail!("expected `kind:id`, e.g. `youtube:dQw4w9WgXcQ`");
     };
@@ -296,6 +300,14 @@ async fn resolve(registry: &SourceRegistry, input: &str) -> Result<()> {
         tokio::task::spawn_blocking(move || range_checks(&check_url, &check_headers)).await?;
     checks.iter().for_each(|line| println!("  {line}"));
 
+    if deep {
+        println!("Downloading for real (bodies read in full):");
+        let (deep_url, deep_headers) = (url.clone(), headers.clone());
+        let lines =
+            tokio::task::spawn_blocking(move || deep_checks(&deep_url, &deep_headers)).await?;
+        lines.iter().for_each(|line| println!("  {line}"));
+    }
+
     println!("Checking the first stream downloads...");
     let report = tokio::task::spawn_blocking(move || probe(&url, &headers)).await?;
     match report {
@@ -303,6 +315,75 @@ async fn resolve(registry: &SourceRegistry, input: &str) -> Result<()> {
         Err(e) => bail!("download failed: {e}"),
     }
     Ok(())
+}
+
+/// Download real data: the end of the file, then the whole file in
+/// 128 KB pieces, reporting the status and bytes of each request.
+fn deep_checks(url: &str, headers: &[(String, String)]) -> Vec<String> {
+    use std::io::Read;
+
+    let agent: veena_net::ureq::Agent = veena_net::config()
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let Some(size) = url
+        .split(['?', '&'])
+        .find_map(|part| part.strip_prefix("clen="))
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return vec!["file size unknown (no clen in the link); skipped".into()];
+    };
+    let fetch = |first: u64, last: u64| -> String {
+        let mut request = agent
+            .get(url)
+            .header("Range", format!("bytes={first}-{last}"));
+        for (name, value) in headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        match request.call() {
+            Ok(mut response) => {
+                let status = response.status().as_u16();
+                let mut body = Vec::new();
+                let read = response.body_mut().as_reader().read_to_end(&mut body);
+                match read {
+                    Ok(n) => format!("{status}, {n} bytes"),
+                    Err(e) => format!("{status}, read failed: {e}"),
+                }
+            }
+            Err(e) => format!("error: {e}"),
+        }
+    };
+
+    let mut lines = vec![
+        format!(
+            "last 2 bytes ({}-{})         {}",
+            size - 2,
+            size - 1,
+            fetch(size - 2, size - 1)
+        ),
+        format!(
+            "near end, not last byte      {}",
+            fetch(size.saturating_sub(65_536), size - 2)
+        ),
+    ];
+    const PIECE: u64 = 128 * 1024;
+    let mut first = 0;
+    let mut pieces = 0;
+    while first < size {
+        let last = (first + PIECE - 1).min(size - 1);
+        let result = fetch(first, last);
+        pieces += 1;
+        if !result.starts_with("206") {
+            lines.push(format!("piece {pieces} ({first}-{last}) failed: {result}"));
+            lines.push(format!("downloaded {first} of {size} bytes before failing"));
+            return lines;
+        }
+        first = last + 1;
+    }
+    lines.push(format!(
+        "whole file in {pieces} pieces of 128 KB: all worked"
+    ));
+    lines
 }
 
 /// Request a stream with different `Range` shapes and report each status.
