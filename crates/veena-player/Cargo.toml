@@ -1,0 +1,10 @@
+[package]
+name = "veena-player"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+veena-core = { path = "../veena-core" }
+veena-audio = { path = "../veena-audio" }
+tokio = { version = "1.54.1", features = ["sync", "rt"] }

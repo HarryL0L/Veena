@@ -17,7 +17,7 @@ new app release.
 | **Android UI** | Jetpack Compose · Material 3 Expressive |
 | **Linux UI** | Slint |
 | **Sources** | YouTube Music · Local files · Extensible via plugins |
-| **Status** | Design phase |
+| **Status** | Early development · Linux terminal player available |
 
 ---
 
@@ -88,22 +88,65 @@ On Linux, `yt-dlp` is available as an optional fallback and stays up to date aut
 
 ---
 
+## Getting started
+
+Veena currently runs as a terminal player on Linux.
+
+**Requirements**
+
+- Rust 1.88 or newer
+- ALSA development files: `sudo apt install libasound2-dev pkg-config` (Debian, Ubuntu)
+
+**Build**
+
+```sh
+cargo build --release
+```
+
+**Use**
+
+```sh
+veena play ~/Music                      # play a folder
+veena play song.flac https://…/a.mp3    # files and links
+veena play ~/Music --shuffle --repeat all
+veena list ~/Music                      # show your library
+veena search "raga" --in ~/Music        # find tracks
+```
+
+| Key | Action |
+|---|---|
+| `Space` | Play / pause |
+| `←` `→` | Seek 5 seconds |
+| `n` `b` | Next / previous |
+| `↑` `↓` | Volume |
+| `s` `r` | Shuffle / repeat |
+| `l` | Show queue |
+| `q` | Quit |
+
+Supported formats: MP3, FLAC, AAC/M4A, ALAC, Ogg Vorbis, WAV, AIFF, MKA.
+
+---
+
 ## Project structure
 
 ```
 veena/
-├── crates/        Rust core: audio, plugins, updater, sources
-├── apps/
-│   ├── android/   Compose app (Kotlin) using the core via UniFFI
-│   └── linux/     Slint desktop app
-└── plugins/       Source plugins (signed and published separately)
+├── crates/
+│   ├── veena-core/        Tracks, sources, queue
+│   ├── veena-audio/       Decoding, streaming, output
+│   ├── veena-player/      Queue and audio working together
+│   └── veena-src-local/   Local music files
+└── apps/
+    └── linux/             Terminal player
 ```
+
+Planned: `apps/android` (Compose via UniFFI), a Slint desktop app, the plugin engine and updater.
 
 ---
 
 ## Roadmap
 
-- [ ] Core playback for local files and streams
+- [x] Core playback for local files and streams
 - [ ] Plugin engine and sandbox
 - [ ] YouTube Music plugin
 - [ ] Automatic, signed plugin updates

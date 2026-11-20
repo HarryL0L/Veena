@@ -1,0 +1,12 @@
+[package]
+name = "veena-audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+veena-core = { path = "../veena-core" }
+log = "0.4.35"
+rodio = { version = "0.21.1", default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav", "symphonia-mkv", "symphonia-alac", "symphonia-aiff"] }
+thiserror = "2.0.21"
+ureq = "3.5.2"

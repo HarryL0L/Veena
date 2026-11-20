@@ -1,0 +1,11 @@
+[package]
+name = "veena-src-local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+veena-core = { path = "../veena-core" }
+async-trait = "0.1.92"
+lofty = "0.24.0"
+walkdir = "2.5.0"
