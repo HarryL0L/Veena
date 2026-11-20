@@ -10,7 +10,7 @@
 export const meta = {
   id: "youtube-audio",
   name: "YouTube audio",
-  version: "0.2.0",
+  version: "0.3.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -67,7 +67,32 @@ async function probe(stream) {
   return res.status;
 }
 
+/**
+ * YouTube's anonymous visitor id. Without it some app types answer
+ * "Sign in to confirm you're not a bot".
+ */
+async function visitorData() {
+  const cached = veena.cache.get("visitor");
+  if (cached) return cached;
+  try {
+    const res = await veena.http.fetch(`${BASE}/`, {
+      // Skips the cookie consent page shown in some regions.
+      headers: { Cookie: "SOCS=CAI", "Accept-Language": "en" },
+    });
+    const match = /"VISITOR_DATA":"([^"]+)"/.exec(res.text);
+    if (match) {
+      veena.cache.set("visitor", match[1], 6 * 3600);
+      return match[1];
+    }
+    veena.log("no visitor id on the YouTube home page");
+  } catch (e) {
+    veena.log(`could not get a visitor id: ${e}`);
+  }
+  return undefined;
+}
+
 async function streamsFrom(client, videoId) {
+  const visitor = await visitorData();
   const res = await veena.http.fetch(`${BASE}/youtubei/v1/player?prettyPrint=false`, {
     method: "POST",
     headers: {
@@ -75,6 +100,7 @@ async function streamsFrom(client, videoId) {
       "User-Agent": client.userAgent,
       "X-YouTube-Client-Name": String(client.id),
       "X-YouTube-Client-Version": client.version,
+      ...(visitor ? { "X-Goog-Visitor-Id": visitor } : {}),
     },
     body: JSON.stringify({
       context: {
@@ -83,6 +109,7 @@ async function streamsFrom(client, videoId) {
           clientVersion: client.version,
           hl: "en",
           gl: veena.config.region ?? "US",
+          visitorData: visitor,
           ...client.extra,
         },
       },

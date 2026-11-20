@@ -122,7 +122,11 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
             let body: Value = serde_json::from_str(&request.body).unwrap();
             let video = body["videoId"].as_str().unwrap_or_default();
             let user_agent = request.header("user-agent");
-            let response = if user_agent.contains("oculus") {
+            let has_visitor = request.header("x-goog-visitor-id") == "VIS123"
+                && body["context"]["client"]["visitorData"] == "VIS123";
+            // Like YouTube: one app type needs a visitor id, another is
+            // switched off for this video.
+            let response = if (user_agent.contains("oculus") && !has_visitor) || (user_agent.contains("ios") && video == "ios-off") {
                 json!({"playabilityStatus": {"status": "LOGIN_REQUIRED", "reason": "Sign in to confirm you're not a bot"}})
             } else if video == "denied" {
                 json!({
@@ -282,7 +286,7 @@ async fn audio_links_fall_back_and_pick_aac() {
     let audio = load("youtube-audio.js", &base).await;
     assert!(audio.is_resolver() && !audio.is_catalog());
 
-    // The first client type is refused; the second works.
+    // The visitor id from the home page gets the first app type through.
     let track = Track::new(TrackId::new("youtube", "vid1"), "Doodle");
     let streams = audio.resolve(&track).await.unwrap();
     assert_eq!(streams.len(), 2, "only AAC with direct links: {streams:#?}");
@@ -295,7 +299,7 @@ async fn audio_links_fall_back_and_pick_aac() {
             assert!(
                 headers
                     .iter()
-                    .any(|(k, v)| k == "User-Agent" && v.contains("ios.youtube"))
+                    .any(|(k, v)| k == "User-Agent" && v.contains("oculus"))
             );
         }
         other => panic!("unexpected {other:?}"),
@@ -304,10 +308,10 @@ async fn audio_links_fall_back_and_pick_aac() {
     // Links that are refused on download are skipped, not returned.
     let denied = Track::new(TrackId::new("youtube", "denied"), "x");
     let error = audio.resolve(&denied).await.unwrap_err().to_string();
-    assert!(
-        error.contains("IOS: links refused when downloading (status 403)"),
-        "{error}"
-    );
+    for client in ["ANDROID_VR", "IOS"] {
+        let expected = format!("{client}: links refused when downloading (status 403)");
+        assert!(error.contains(&expected), "{error}");
+    }
 
     let opus = Track::new(TrackId::new("youtube", "opus-only"), "x");
     let error = audio.resolve(&opus).await.unwrap_err().to_string();
@@ -318,9 +322,37 @@ async fn audio_links_fall_back_and_pick_aac() {
 
     let blocked = Track::new(TrackId::new("youtube", "blocked"), "x");
     let error = audio.resolve(&blocked).await.unwrap_err().to_string();
-    assert!(error.contains("ANDROID_VR: LOGIN_REQUIRED"), "{error}");
-    assert!(
-        error.contains("IOS: UNPLAYABLE: Video unavailable"),
-        "{error}"
-    );
+    for client in ["ANDROID_VR", "IOS"] {
+        let expected = format!("{client}: UNPLAYABLE: Video unavailable");
+        assert!(error.contains(&expected), "{error}");
+    }
+}
+
+#[tokio::test]
+async fn falls_back_when_the_first_app_type_is_refused() {
+    let base = serve(Arc::default());
+    let mut config = serde_json::Map::new();
+    config.insert("baseUrl".into(), base.clone().into());
+    // Without the home page's visitor id, the first app type is refused.
+    let options = Options {
+        config,
+        domains: Some(vec!["127.0.0.1".into()]),
+        ..Options::default()
+    };
+    let code = std::fs::read_to_string(plugin_path("youtube-audio.js"))
+        .unwrap()
+        .replace("/\"VISITOR_DATA\":\"([^\"]+)\"/", "/NO_VISITOR_DATA_HERE/");
+    let audio = PluginBrick::load(code, options).await.unwrap();
+    let track = Track::new(TrackId::new("youtube", "vid1"), "x");
+    let streams = audio.resolve(&track).await.unwrap();
+    match &streams[0].location {
+        StreamLocation::Http { headers, .. } => {
+            assert!(
+                headers
+                    .iter()
+                    .any(|(k, v)| k == "User-Agent" && v.contains("ios.youtube"))
+            );
+        }
+        other => panic!("unexpected {other:?}"),
+    }
 }
