@@ -10,6 +10,7 @@ publish = false
 veena-core = { path = "../../crates/veena-core" }
 veena-player = { path = "../../crates/veena-player" }
 veena-audio = { path = "../../crates/veena-audio" }
+veena-net = { path = "../../crates/veena-net" }
 veena-plugin = { path = "../../crates/veena-plugin" }
 veena-src-local = { path = "../../crates/veena-src-local" }
 anyhow = "1.0.104"

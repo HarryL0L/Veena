@@ -7,6 +7,11 @@ use veena_net::{agent, ureq};
 /// servers (YouTube refuses open-ended ones) and keep seeks cheap.
 const CHUNK_SIZE: u64 = 4 * 1024 * 1024;
 
+/// The first request, made before the file size is known, asks for only
+/// this much, so no request ever extends past the end of the file (which
+/// some servers, including YouTube's, refuse).
+const FIRST_CHUNK_SIZE: u64 = 256 * 1024;
+
 /// Forward seeks up to this distance read through the open connection instead
 /// of starting a new request.
 const SKIP_THRESHOLD: u64 = 256 * 1024;
@@ -72,10 +77,10 @@ impl HttpReader {
 
     /// Request the next chunk, starting at the current position.
     fn connect(&mut self) -> io::Result<()> {
-        let mut last = self.pos + self.chunk_size - 1;
-        if let Some(len) = self.len {
-            last = last.min(len.saturating_sub(1));
-        }
+        let last = match self.len {
+            Some(len) => (self.pos + self.chunk_size - 1).min(len.saturating_sub(1)),
+            None => self.pos + self.chunk_size.min(FIRST_CHUNK_SIZE) - 1,
+        };
         let mut request = agent()
             .get(&self.url)
             .header("Range", format!("bytes={}-{last}", self.pos));
@@ -247,6 +252,7 @@ mod tests {
                 let mut stream = stream.unwrap();
                 let mut start = 0usize;
                 let mut end = data.len();
+                let mut refuse = false;
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 loop {
                     let mut line = String::new();
@@ -256,12 +262,19 @@ mod tests {
                     if let Some(v) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
                         let (first, last) = v.trim().split_once('-').unwrap();
                         start = first.parse().unwrap();
-                        end = last
-                            .parse::<usize>()
-                            .map_or(data.len(), |l| (l + 1).min(data.len()));
+                        let last = last.parse::<usize>().ok();
+                        // Like YouTube: refuse open-ended ranges and ranges
+                        // past the end of the file.
+                        refuse = last.is_none_or(|l| l >= data.len());
+                        end = last.map_or(data.len(), |l| (l + 1).min(data.len()));
                     }
                 }
-                let head = if ranges {
+                let head = if ranges && refuse {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                    continue;
+                } else if ranges {
                     format!(
                         "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{}/{}\r\nContent-Length: {}\r\nContent-Type: audio/wav\r\nConnection: close\r\n\r\n",
                         end - 1,

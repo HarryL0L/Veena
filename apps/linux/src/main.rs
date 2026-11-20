@@ -290,6 +290,12 @@ async fn resolve(registry: &SourceRegistry, input: &str) -> Result<()> {
     let veena_core::StreamLocation::Http { url, headers } = streams[0].location.clone() else {
         return Ok(());
     };
+    println!("Which request shapes the server accepts:");
+    let (check_url, check_headers) = (url.clone(), headers.clone());
+    let checks =
+        tokio::task::spawn_blocking(move || range_checks(&check_url, &check_headers)).await?;
+    checks.iter().for_each(|line| println!("  {line}"));
+
     println!("Checking the first stream downloads...");
     let report = tokio::task::spawn_blocking(move || probe(&url, &headers)).await?;
     match report {
@@ -297,6 +303,59 @@ async fn resolve(registry: &SourceRegistry, input: &str) -> Result<()> {
         Err(e) => bail!("download failed: {e}"),
     }
     Ok(())
+}
+
+/// Request a stream with different `Range` shapes and report each status.
+/// Servers differ in which they accept, and the player depends on it.
+fn range_checks(url: &str, headers: &[(String, String)]) -> Vec<String> {
+    let agent: veena_net::ureq::Agent = veena_net::config()
+        .http_status_as_error(false)
+        .build()
+        .into();
+    // YouTube links state the file size in the `clen` parameter.
+    let size: Option<u64> = url
+        .split(['?', '&'])
+        .find_map(|part| part.strip_prefix("clen="))
+        .and_then(|v| v.parse().ok());
+
+    let mut shapes = vec![
+        ("first 2 bytes", Some("bytes=0-1".to_owned())),
+        ("first 64 KB", Some("bytes=0-65535".to_owned())),
+    ];
+    if let Some(size) = size {
+        shapes.push(("whole file, exact", Some(format!("bytes=0-{}", size - 1))));
+        shapes.push((
+            "past the end",
+            Some(format!("bytes=0-{}", size + 1_000_000)),
+        ));
+        shapes.push((
+            "from the middle",
+            Some(format!("bytes={}-{}", size / 2, size / 2 + 65535)),
+        ));
+    }
+    shapes.push(("open-ended (bytes=0-)", Some("bytes=0-".to_owned())));
+    shapes.push(("no Range header", None));
+
+    let mut lines = vec![match size {
+        Some(size) => format!("file size {size} bytes"),
+        None => "file size unknown (no clen in the link)".into(),
+    }];
+    for (label, range) in shapes {
+        let mut request = agent.get(url);
+        for (name, value) in headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        if let Some(range) = &range {
+            request = request.header("Range", range.as_str());
+        }
+        // Only the status matters; the body is not read.
+        let result = match request.call() {
+            Ok(response) => format!("{}", response.status().as_u16()),
+            Err(e) => format!("error: {e}"),
+        };
+        lines.push(format!("{label:<24} {result}"));
+    }
+    lines
 }
 
 /// Read the start of a stream, then jump to the middle and read again.

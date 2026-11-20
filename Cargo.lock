@@ -2350,6 +2350,7 @@ dependencies = [
  "tokio",
  "veena-audio",
  "veena-core",
+ "veena-net",
  "veena-player",
  "veena-plugin",
  "veena-src-local",
