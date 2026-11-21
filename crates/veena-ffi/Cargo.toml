@@ -1,0 +1,31 @@
+[package]
+name = "veena-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+# cdylib for the Android app; rlib for tests.
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+# Generates the Kotlin bindings: cargo run -p veena-ffi --bin uniffi-bindgen
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+veena-core = { path = "../veena-core" }
+veena-player = { path = "../veena-player" }
+veena-plugin = { path = "../veena-plugin" }
+veena-src-local = { path = "../veena-src-local" }
+veena-updater = { path = "../veena-updater" }
+log = "0.4.35"
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "macros"] }
+uniffi = { version = "0.32.2", features = ["cli"] }
+
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
