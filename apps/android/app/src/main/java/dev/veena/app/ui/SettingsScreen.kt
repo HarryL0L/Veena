@@ -51,7 +51,11 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import dev.veena.app.BuildConfig
+import dev.veena.app.DayPart
+import dev.veena.app.Season
 import dev.veena.app.PlayerViewModel
 import dev.veena.app.R
 import dev.veena.app.Settings
@@ -209,6 +213,84 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
                         }
                     },
                 )
+            }
+
+            group("Living background", "An animated sky on Home that follows the clock and the calendar.") {
+                val rows = mutableListOf<@Composable (Int, Int) -> Unit>(
+                    { i, n ->
+                        SwitchItem(
+                            index = i, count = n,
+                            icon = R.drawable.ic_animation,
+                            title = "Living background",
+                            subtitle = "Sun, moon, stars and the seasons. It holds still with Battery Saver or when animations are off.",
+                            checked = settings.ambience,
+                            onChange = { on -> viewModel.updateSettings { it.copy(ambience = on) } },
+                        )
+                    },
+                )
+                if (settings.ambience) {
+                    rows += { i, n ->
+                        Card(index = i, count = n) {
+                            val ambience = rememberAmbience(settings)
+                            AmbientScene(
+                                ambience,
+                                Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(20.dp)),
+                                fadeBottom = false,
+                            )
+                            Text(
+                                "${ambience.dayPart.label} · ${ambience.season.label}" + (ambience.occasion?.let { " · ${it.greeting}" } ?: ""),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                    }
+                    rows += { i, n ->
+                        Card(index = i, count = n) {
+                            ChoiceHeader(R.drawable.ic_twilight, "Time of day", "Auto follows the clock.")
+                            Choices(
+                                options = listOf<DayPart?>(null) + DayPart.entries,
+                                selected = settings.dayPart,
+                                label = { it?.label ?: "Auto" },
+                                onPick = { part -> viewModel.updateSettings { it.copy(dayPart = part) } },
+                            )
+                        }
+                    }
+                    rows += { i, n ->
+                        Card(index = i, count = n) {
+                            ChoiceHeader(R.drawable.ic_eco, "Season", "Auto follows the date.")
+                            Choices(
+                                options = listOf<Season?>(null) + Season.entries,
+                                selected = settings.season,
+                                label = { it?.label ?: "Auto" },
+                                onPick = { season -> viewModel.updateSettings { it.copy(season = season) } },
+                            )
+                        }
+                    }
+                    if (settings.season == null) {
+                        rows += { i, n ->
+                            SwitchItem(
+                                index = i, count = n,
+                                icon = R.drawable.ic_public,
+                                title = "Southern hemisphere",
+                                subtitle = "Summer in December, winter in June.",
+                                checked = settings.southern,
+                                onChange = { on -> viewModel.updateSettings { it.copy(southern = on) } },
+                            )
+                        }
+                    }
+                    rows += { i, n ->
+                        SwitchItem(
+                            index = i, count = n,
+                            icon = R.drawable.ic_celebration,
+                            title = "Special days",
+                            subtitle = "Lamps for Diwali, fireworks at New Year, hearts on Valentine's Day.",
+                            checked = settings.specialDays,
+                            onChange = { on -> viewModel.updateSettings { it.copy(specialDays = on) } },
+                        )
+                    }
+                }
+                rows.mapIndexed { i, row -> @Composable { row(i, rows.size) } }
             }
 
             group("Bricks", "The parts that fetch music and lyrics. They update on their own, without a new app.") {
@@ -369,6 +451,38 @@ private fun SwitchItem(
             )
         },
     ) { Text(title) }
+}
+
+/** The icon, title and note above a row of choices. */
+@Composable
+private fun ChoiceHeader(icon: Int, title: String, note: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconBadge(icon)
+        Column(Modifier.padding(start = 16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(note, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** One choice out of a few, as chips that wrap onto a second line if needed. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T> Choices(options: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
+    FlowRow(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { option ->
+            FilterChip(
+                selected = option == selected,
+                onClick = { onPick(option) },
+                label = { Text(label(option)) },
+                leadingIcon = if (option == selected) {
+                    { Icon(painterResource(R.drawable.ic_check), contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else {
+                    null
+                },
+            )
+        }
+    }
 }
 
 /** A card-shaped group row with free-form content (sliders, chips, buttons). */

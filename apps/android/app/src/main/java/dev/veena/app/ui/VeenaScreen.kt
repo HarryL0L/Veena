@@ -151,9 +151,13 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
         // The mini player floats over the page, so songs scroll behind it;
         // lists leave this much room at the end so nothing stays hidden.
         val miniPlayerSpace = if (player.current != null) 104.dp else 0.dp
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        // Home's sky reaches up behind the status bar; other pages start below it.
+        val below = Modifier.padding(top = padding.calculateTopPadding())
+        Box(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
           CompositionLocalProvider(LocalMiniPlayerSpace provides miniPlayerSpace) {
             val open = collection
+            val onHome = !showSettings && open == null && tab == Tab.HOME
+            Box(if (onHome) Modifier.fillMaxSize() else below.fillMaxSize()) {
             when {
                 showSettings -> {
                     BackHandler { showSettings = false }
@@ -180,11 +184,18 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                     viewModel = viewModel,
                     actions = actions,
                     onOpen = { collection = it },
-                    onSearch = { tab = Tab.SEARCH },
+                    onSearch = { query ->
+                        if (query != null) {
+                            viewModel.onQueryChange(query)
+                            viewModel.search()
+                        }
+                        tab = Tab.SEARCH
+                    },
                     onSettings = { showSettings = true },
                 )
                 tab == Tab.SEARCH -> SearchScreen(viewModel, actions, onLogs = { showLogs = true })
                 else -> LibraryScreen(viewModel, onOpen = { collection = it })
+            }
             }
           }
             if (player.current != null) {
@@ -365,7 +376,12 @@ fun TrackRow(
                     )
                 }
             },
-            leadingContent = { Artwork(track.artwork, 52) },
+            leadingContent = {
+                Box {
+                    Artwork(track.artwork, 52)
+                    if (playing) PlayingOverlay(Modifier.matchParentSize().clip(RoundedCornerShape(13.dp)))
+                }
+            },
             trailingContent = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     track.durationMs?.let { Text(formatTime(it.toLong()), style = MaterialTheme.typography.labelMedium) }
