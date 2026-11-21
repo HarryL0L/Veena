@@ -80,7 +80,7 @@ The app is one stable piece. Only the parts that need constant updates are plugi
 | **Search** | Find songs, albums and artists | Every search brick is queried |
 | **Audio links** | Turn a song into a playable link | If one brick fails, the next is tried |
 
-Automatic, signed updates work as follows (in development):
+Plugins update automatically and securely:
 
 | Step | What happens |
 |---|---|
@@ -153,14 +153,16 @@ veena/
 │   ├── veena-audio/       Decoding, streaming, output
 │   ├── veena-player/      Queue and audio working together
 │   ├── veena-plugin/      JavaScript plugin engine and sandbox
+│   ├── veena-updater/     Signed plugin updates and rollback
 │   ├── veena-net/         Shared HTTP and TLS setup
 │   └── veena-src-local/   Local music files
 ├── apps/
-│   └── linux/             Terminal player
+│   ├── linux/             Terminal player
+│   └── sign/              veena-sign: sign and publish plugin updates
 └── plugins/               Source plugins and the plugin guide
 ```
 
-Planned: `apps/android` (Compose via UniFFI), a Slint desktop app and the plugin updater.
+Planned: `apps/android` (Compose via UniFFI) and a Slint desktop app.
 
 ---
 
@@ -170,7 +172,7 @@ Planned: `apps/android` (Compose via UniFFI), a Slint desktop app and the plugin
 - [x] Plugin engine and sandbox
 - [x] Search and audio-link slots with automatic fallback
 - [ ] YouTube Music plugin
-- [ ] Automatic, signed plugin updates
+- [x] Automatic, signed plugin updates
 - [ ] Android app with Material 3 Expressive
 - [ ] Linux app
 - [ ] Offline downloads, lyrics, gapless playback

@@ -73,6 +73,18 @@ enum Command {
         #[command(flatten)]
         playback: PlaybackArgs,
     },
+    /// Check for signed plugin updates and install them.
+    Update {
+        /// URL of the signed manifest.json.
+        #[arg(long, env = "VEENA_UPDATE_URL")]
+        manifest: Option<String>,
+        /// Base64 public key manifests must be signed with.
+        #[arg(long, env = "VEENA_UPDATE_KEY")]
+        key: Option<String>,
+        /// Restore the previous version of this brick instead.
+        #[arg(long, value_name = "BRICK")]
+        rollback: Option<String>,
+    },
     /// Show installed bricks (plugins).
     Plugins,
     /// Get a track's audio link and check that it downloads, without playing.
@@ -179,6 +191,16 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Update {
+            manifest,
+            key,
+            rollback,
+        } => {
+            let Some(dir) = plugins_dir else {
+                bail!("no plugin folder: set --plugins or VEENA_PLUGINS");
+            };
+            update(&dir, manifest, key, rollback, &options).await
+        }
         Command::Plugins => {
             show_plugins(plugins_dir.as_ref(), &options).await;
             Ok(())
@@ -249,7 +271,7 @@ async fn registry(
     let Some(dir) = plugins_dir.filter(|d| d.is_dir()) else {
         return registry;
     };
-    match veena_plugin::load_dir(dir, options).await {
+    match veena_updater::load_installed(dir, options).await {
         Ok(plugins) => {
             for (path, plugin) in plugins {
                 match plugin {
@@ -532,12 +554,61 @@ impl log::Log for StderrLogger {
     fn flush(&self) {}
 }
 
+/// Check the signed manifest and install updates, or roll one brick back.
+async fn update(
+    dir: &std::path::Path,
+    manifest: Option<String>,
+    key: Option<String>,
+    rollback: Option<String>,
+    options: &Options,
+) -> Result<()> {
+    // Builds can embed defaults: VEENA_UPDATE_URL and VEENA_UPDATE_KEY at compile time.
+    let manifest = manifest.or(option_env!("VEENA_UPDATE_URL").map(str::to_owned));
+    let key = key.or(option_env!("VEENA_UPDATE_KEY").map(str::to_owned));
+    let (Some(manifest), Some(key)) = (manifest, key) else {
+        bail!(
+            "set the manifest URL and public key (--manifest/--key or VEENA_UPDATE_URL/VEENA_UPDATE_KEY)"
+        );
+    };
+    let updater = veena_updater::Updater::new(dir, &key, manifest)?.with_options(options.clone());
+
+    if let Some(id) = rollback {
+        let version = updater.rollback(&id)?;
+        println!("{id}: rolled back to {version}");
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(dir)?;
+    let report = updater.check().await?;
+    println!("Manifest sequence {}", report.sequence);
+    for (id, from, to) in &report.installed {
+        match from {
+            Some(from) => println!("  updated    {id}  {from} → {to}"),
+            None => println!("  installed  {id}  {to}"),
+        }
+    }
+    for id in &report.settings_changed {
+        println!("  settings   {id}  updated");
+    }
+    for (id, why) in &report.skipped {
+        println!("  skipped    {id}  {why}");
+    }
+    for (id, error) in &report.failed {
+        println!("  failed     {id}  {error}");
+    }
+    if report.installed.is_empty() && report.settings_changed.is_empty() && report.failed.is_empty()
+    {
+        println!("  everything is up to date");
+    }
+    Ok(())
+}
+
 async fn show_plugins(plugins_dir: Option<&PathBuf>, options: &Options) {
     let Some(dir) = plugins_dir else {
         println!("No plugin folder: set --plugins or VEENA_PLUGINS.");
         return;
     };
-    let plugins = match veena_plugin::load_dir(dir, options).await {
+    let plugins = match veena_updater::load_installed(dir, options).await {
         Ok(plugins) => plugins,
         Err(e) => {
             println!("No plugins in {} ({e}).", dir.display());

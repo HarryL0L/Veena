@@ -12,6 +12,7 @@ veena-player = { path = "../../crates/veena-player" }
 veena-audio = { path = "../../crates/veena-audio" }
 veena-net = { path = "../../crates/veena-net" }
 veena-plugin = { path = "../../crates/veena-plugin" }
+veena-updater = { path = "../../crates/veena-updater" }
 veena-src-local = { path = "../../crates/veena-src-local" }
 anyhow = "1.0.104"
 clap = { version = "4.6.9", features = ["derive", "env"] }

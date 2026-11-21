@@ -1,2 +1,4 @@
 /target
 .claude/settings.local.json
+# Signing keys must never be committed
+*.key

@@ -123,6 +123,48 @@ Memory use is not limited yet. Plugins are trusted code: in a later release ever
 
 ---
 
+## Publishing updates
+
+Veena installs signed updates with `veena update`. Only manifests signed with your key are accepted.
+
+**Once:** create a key pair. Keep the key file private and backed up.
+
+```sh
+veena-sign keygen                 # writes veena-signing.key, prints the public key
+```
+
+**Each release:** sign the plugin folder and upload the output anywhere (GitHub Pages, a release, a web server).
+
+```sh
+veena-sign publish --plugins plugins --out site
+veena-sign publish --plugins plugins --out site --settings settings.json   # with settings
+```
+
+`settings.json` delivers `veena.config` values and trusted domains per plugin, without a new plugin version:
+
+```json
+{ "youtube-tv-audio": { "config": { "region": "IN" } } }
+```
+
+**In Veena:**
+
+```sh
+export VEENA_UPDATE_URL=https://example.com/site/manifest.json
+export VEENA_UPDATE_KEY=<public key>
+veena update                        # install what is new
+veena update --rollback <plugin>    # restore the previous version
+```
+
+| Safeguard | Effect |
+|---|---|
+| Signature | Manifests not signed with your key are refused. |
+| SHA-256 | Each plugin must match the hash in the signed manifest. |
+| Test load | A plugin must load and match its id and version before it replaces the old one. |
+| Sequence | A manifest older than one already applied is refused, so old versions cannot be replayed. |
+| Rollback | The previous version is kept; a plugin that stops loading is rolled back automatically, and a rolled-back version is never reinstalled. |
+
+---
+
 ## Included plugins
 
 | File | Source |
