@@ -145,11 +145,15 @@ fun PlayerScreen(
 
     ArtworkTheme(track.artwork) {
         val colors = MaterialTheme.colorScheme
-        Box(
-            Modifier
+        // A Surface (not a plain Box) so text and icons take the artwork
+        // scheme's on-surface colour: light in dark mode, dark in light mode.
+        Surface(
+            modifier = Modifier
                 .fillMaxSize()
                 .offset { IntOffset(0, offset.value.roundToInt()) }
                 .background(Brush.verticalGradient(listOf(colors.primaryContainer, colors.surface, colors.surface))),
+            color = Color.Transparent,
+            contentColor = colors.onSurface,
         ) {
             // The queue as shown, reordered live while dragging and sent to
             // the player when the drag ends.
