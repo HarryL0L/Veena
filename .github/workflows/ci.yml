@@ -30,6 +30,11 @@ jobs:
   android:
     name: Android app (APK)
     runs-on: ubuntu-latest
+    # One Android build per branch at a time; a newer push replaces an older
+    # build, so two builds never race to publish the nightly.
+    concurrency:
+      group: android-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       # Publishes the nightly pre-release on pushes.
       contents: write
