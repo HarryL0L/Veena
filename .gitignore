@@ -6,3 +6,4 @@
 # Signing keys never go in the repository.
 *.jks
 *.keystore
+*.b64
