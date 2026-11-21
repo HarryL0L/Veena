@@ -1,12 +1,11 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "dev.veena.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.veena.app"
@@ -36,10 +35,6 @@ android {
     packaging {
         jniLibs.useLegacyPackaging = false
     }
-}
-
-kotlin {
-    jvmToolchain(17)
 }
 
 dependencies {
