@@ -35,7 +35,7 @@ struct Shown {
 pub fn start(window: slint::Weak<crate::AppWindow>) {
     let started = slint::spawn_local(async move {
         let player = match Player::builder("Veena")
-            .identity("Veena")
+            .identity("Veena Music")
             .desktop_entry("veena-desktop")
             .can_raise(true)
             .can_play(true)

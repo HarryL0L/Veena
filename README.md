@@ -1,4 +1,4 @@
-# Veena
+# Veena Music
 
 A modular music player for Android and Linux.
 
@@ -82,7 +82,8 @@ new app release.
   and volume.
 
 Run it with `cargo run --release -p veena-desktop`. To add it to your app
-menu, copy `apps/desktop/veena-desktop.desktop` to `~/.local/share/applications/`
+menu, copy `apps/desktop/veena-desktop.desktop` to `~/.local/share/applications/`,
+`apps/desktop/data/veena-music.svg` to `~/.local/share/icons/hicolor/scalable/apps/`,
 and the binary to a folder on your `PATH`. The UI is made with
 [Slint](https://slint.dev) under its royalty-free license.
 

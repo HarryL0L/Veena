@@ -235,7 +235,7 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
 
             group("About") {
                 listOf<@Composable () -> Unit>(
-                    { Item(index = 0, count = 2, icon = R.drawable.ic_info, title = "Veena", subtitle = "Version ${BuildConfig.VERSION_NAME}") },
+                    { Item(index = 0, count = 2, icon = R.drawable.ic_info, title = "Veena Music", subtitle = "Version ${BuildConfig.VERSION_NAME}") },
                     {
                         Item(
                             index = 1, count = 2,

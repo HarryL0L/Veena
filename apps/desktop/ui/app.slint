@@ -830,7 +830,8 @@ component PlayerBar inherits Rectangle {
 // ---------------------------------------------------------------- Window
 
 export component AppWindow inherits Window {
-    title: "Veena";
+    title: "Veena Music";
+    icon: @image-url("icons/veena.svg");
     preferred-width: 1360px;
     preferred-height: 860px;
     min-width: 900px;
@@ -929,9 +930,9 @@ export component AppWindow inherits Window {
                         Rectangle {
                             width: 48px;
                             height: 48px;
-                            border-radius: 16px;
-                            background: Theme.accent-container;
-                            Icon { source: @image-url("icons/music_note.svg"); tint: Theme.accent; width: 26px; height: 26px; }
+                            border-radius: 14px;
+                            clip: true;
+                            Image { source: @image-url("icons/veena.svg"); width: 100%; height: 100%; }
                         }
                     }
                     Rectangle { height: 8px; }

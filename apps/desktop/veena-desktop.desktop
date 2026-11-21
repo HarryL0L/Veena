@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Veena
+Name=Veena Music
 GenericName=Music Player
 Comment=Play music from YouTube Music and more
 Exec=veena-desktop
-Icon=multimedia-audio-player
+Icon=veena-music
 Terminal=false
 Categories=AudioVideo;Audio;Player;
 Keywords=music;player;youtube;lyrics;
