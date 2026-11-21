@@ -355,7 +355,7 @@ component HomePage inherits Rectangle {
         if root.recent.length > 0: SectionTitle { text: "Recently played"; }
         if root.recent.length > 0: Flickable {
             height: 240px;
-            viewport-width: recent-row.preferred-width;
+            content-width: recent-row.preferred-width;
             recent-row := HorizontalLayout {
                 spacing: 4px;
                 alignment: start;
@@ -906,7 +906,13 @@ export component AppWindow inherits Window {
             reject
         }
 
+        // Placed explicitly, so the window doesn't size itself from its own
+        // contents (a layout loop).
         VerticalLayout {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
             padding: 12px;
             padding-left: 0;
             spacing: 12px;

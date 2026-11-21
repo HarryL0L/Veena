@@ -572,7 +572,7 @@ fn accent_from(url: Option<&str>) {
 /// The average colour, weighting colourful pixels far above grey ones.
 fn vivid_average(rgba: &[u8]) -> (u8, u8, u8) {
     let (mut r, mut g, mut b, mut weight) = (0f64, 0f64, 0f64, 0f64);
-    for px in rgba.chunks_exact(4).step_by(3) {
+    for px in rgba.as_chunks::<4>().0.iter().step_by(3) {
         let (pr, pg, pb) = (px[0] as f64, px[1] as f64, px[2] as f64);
         let max = pr.max(pg).max(pb);
         let min = pr.min(pg).min(pb);
