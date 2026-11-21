@@ -161,6 +161,8 @@ pub struct Veena {
     sources: Mutex<std::collections::HashMap<(String, String), String>>,
     /// Liked songs, history and playlists.
     library: Arc<veena_library::Library>,
+    /// Songs kept for offline listening.
+    cache: Arc<veena_player::AudioCache>,
     lyric_bricks: Mutex<Vec<Arc<veena_plugin::PluginBrick>>>,
     /// Set once the bricks have loaded for the first time.
     plugins_ready: (Mutex<bool>, std::sync::Condvar),
@@ -169,9 +171,10 @@ pub struct Veena {
 
 #[uniffi::export]
 impl Veena {
-    /// Start the core. Plugins are loaded from `<data_dir>/plugins`.
+    /// Start the core. Plugins are loaded from `<data_dir>/plugins`; songs
+    /// kept for offline listening go in `cache_dir`.
     #[uniffi::constructor]
-    pub fn new(data_dir: String) -> Result<Arc<Self>, VeenaError> {
+    pub fn new(data_dir: String, cache_dir: String) -> Result<Arc<Self>, VeenaError> {
         init_logging();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -189,8 +192,12 @@ impl Veena {
         // Built-in audio sources: files on the device and direct links.
         registry.add_resolver(Arc::new(veena_src_local::LocalSource::default()));
         registry.add_resolver(Arc::new(UrlSource));
+        let cache = veena_player::AudioCache::open(
+            PathBuf::from(cache_dir).join("songs"),
+            DEFAULT_CACHE_BYTES,
+        );
         let player = runtime
-            .block_on(async { Player::new(registry.clone()) })
+            .block_on(async { Player::with_cache(registry.clone(), Some(cache.clone())) })
             .map_err(VeenaError::new)?;
         let veena = Arc::new(Self {
             runtime,
@@ -200,6 +207,7 @@ impl Veena {
             plugins: Mutex::default(),
             sources: Mutex::default(),
             library,
+            cache,
             lyric_bricks: Mutex::default(),
             plugins_ready: (Mutex::new(false), std::sync::Condvar::new()),
             lyrics_cache: Mutex::default(),
@@ -452,6 +460,55 @@ impl Veena {
         });
     }
 
+    // ------------------------------------------------------------ Offline cache
+
+    /// Keep songs as they stream, to play them again without the internet.
+    pub fn set_cache_enabled(&self, enabled: bool) {
+        self.cache.set_enabled(enabled);
+    }
+
+    /// The most space kept songs may use; the oldest go first.
+    pub fn set_cache_limit_mb(&self, megabytes: u32) {
+        self.cache.set_limit(megabytes as u64 * 1024 * 1024);
+    }
+
+    /// Offline mode: play only songs that are kept on this device.
+    pub fn set_offline(&self, offline: bool) {
+        self.cache.set_offline(offline);
+    }
+
+    pub fn cache_usage_bytes(&self) -> u64 {
+        self.cache.usage()
+    }
+
+    /// Songs kept on this device, most recently played first.
+    pub fn cached_tracks(&self) -> Vec<TrackInfo> {
+        let sources = self.sources.lock().unwrap();
+        self.cache
+            .entries()
+            .iter()
+            .map(|e| {
+                let source = sources
+                    .get(&(e.track.id.kind.clone(), e.track.id.id.clone()))
+                    .cloned()
+                    .unwrap_or_else(|| "Saved".into());
+                to_info(&e.track, source)
+            })
+            .collect()
+    }
+
+    pub fn is_cached(&self, kind: String, id: String) -> bool {
+        self.cache.contains(&Track::new(TrackId::new(kind, id), ""))
+    }
+
+    pub fn remove_from_cache(&self, track: TrackInfo) {
+        self.cache.remove(&from_info(&track));
+    }
+
+    pub fn clear_cache(&self) {
+        self.cache.clear();
+    }
+
     // ------------------------------------------------------------ Library
 
     /// Liked songs, most recently liked first.
@@ -677,6 +734,9 @@ fn from_info(info: &TrackInfo) -> Track {
     }
 }
 
+/// Default size limit for songs kept for offline listening.
+const DEFAULT_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// Most recent log lines kept for the app's logs screen.
 const LOG_LINES: usize = 500;
 static LOGS: Mutex<std::collections::VecDeque<String>> =
@@ -801,7 +861,10 @@ mod tests {
         let file = dir.join("song.wav");
         std::fs::write(&file, wav()).unwrap();
 
-        let veena = match Veena::new(dir.to_string_lossy().into()) {
+        let veena = match Veena::new(
+            dir.to_string_lossy().into(),
+            dir.join("cache").to_string_lossy().into(),
+        ) {
             Ok(veena) => veena,
             // No audio device on this machine (e.g. CI without ALSA config).
             Err(e) => return eprintln!("skipping: {e}"),

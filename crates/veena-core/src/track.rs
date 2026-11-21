@@ -64,6 +64,8 @@ impl Track {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StreamLocation {
     File(PathBuf),
+    /// A song in the offline cache: scrambled, read only by the audio engine.
+    Cached(PathBuf),
     Http {
         url: String,
         /// Extra request headers some services require.

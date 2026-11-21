@@ -29,6 +29,13 @@ class LibraryHub(private val veena: Veena, player: PlayerHub) {
     private val _history = MutableStateFlow<List<TrackInfo>>(emptyList())
     val history: StateFlow<List<TrackInfo>> = _history.asStateFlow()
 
+    private val _cached = MutableStateFlow<List<TrackInfo>>(emptyList())
+    /** Songs kept on this device for offline listening. */
+    val cached: StateFlow<List<TrackInfo>> = _cached.asStateFlow()
+
+    private val _cacheBytes = MutableStateFlow(0L)
+    val cacheBytes: StateFlow<Long> = _cacheBytes.asStateFlow()
+
     private val _playlists = MutableStateFlow<List<PlaylistInfo>>(emptyList())
     val playlists: StateFlow<List<PlaylistInfo>> = _playlists.asStateFlow()
 
@@ -36,6 +43,7 @@ class LibraryHub(private val veena: Veena, player: PlayerHub) {
         scope.launch {
             _liked.value = veena.liked()
             _playlists.value = veena.playlists()
+            refreshCache()
         }
         // The core adds each song to the history when it starts.
         scope.launch {
@@ -45,6 +53,9 @@ class LibraryHub(private val veena: Veena, player: PlayerHub) {
                 .collect {
                     delay(500)
                     _history.value = veena.history()
+                    // A song is kept once it has streamed in full, usually
+                    // by the time the next one starts.
+                    refreshCache()
                 }
         }
     }
@@ -62,6 +73,30 @@ class LibraryHub(private val veena: Veena, player: PlayerHub) {
     }
 
     fun clearHistory() = change { clearHistory() }
+
+    fun isCached(track: TrackInfo) = _cached.value.any { it.kind == track.kind && it.id == track.id }
+
+    fun clearCache() {
+        scope.launch {
+            veena.clearCache()
+            refreshCache()
+        }
+    }
+
+    fun removeFromCache(track: TrackInfo) {
+        scope.launch {
+            veena.removeFromCache(track)
+            refreshCache()
+        }
+    }
+
+    /** Re-read the kept songs (after a song finishes or the size limit changes). */
+    fun refreshCache() {
+        scope.launch {
+            _cached.value = veena.cachedTracks()
+            _cacheBytes.value = veena.cacheUsageBytes().toLong()
+        }
+    }
 
     suspend fun playlistTracks(id: String): List<TrackInfo> = withContext(Dispatchers.IO) { veena.playlistTracks(id) }
 

@@ -4,11 +4,13 @@
 //! file or over HTTP. Decoding is done by symphonia and output by cpal, both
 //! through rodio, so the same code runs on Linux and Android.
 
+mod cache;
 mod decode;
 mod engine;
 mod http;
 mod prefetch;
 
+pub use cache::{AudioCache, CacheEntry, CacheWriter, CachedReader};
 pub use engine::{AudioEngine, AudioEvent, PlaybackState};
 pub use http::HttpReader;
 pub use prefetch::PrefetchReader;

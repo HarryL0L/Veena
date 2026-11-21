@@ -381,7 +381,9 @@ async fn resolve(registry: &SourceRegistry, input: &str, deep: bool) -> Result<(
             veena_core::StreamLocation::Http { url, .. } => {
                 url.split('?').next().unwrap_or(url).to_owned()
             }
-            veena_core::StreamLocation::File(path) => path.display().to_string(),
+            veena_core::StreamLocation::File(path) | veena_core::StreamLocation::Cached(path) => {
+                path.display().to_string()
+            }
         };
         println!(
             "  {}  {bitrate}  {place}",

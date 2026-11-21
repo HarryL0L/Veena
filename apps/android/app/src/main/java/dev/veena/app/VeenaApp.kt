@@ -15,6 +15,8 @@ class VeenaApp : Application() {
         private set
     lateinit var library: LibraryHub
         private set
+    lateinit var settings: Settings
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -22,7 +24,8 @@ class VeenaApp : Application() {
         // Lets YouTube bricks get proof-of-origin tokens from a hidden web view.
         val minter = PoTokenMinter(this)
         setTokenMinter(minter)
-        veena = Veena(filesDir.absolutePath)
+        veena = Veena(filesDir.absolutePath, cacheDir.absolutePath)
+        settings = Settings(this, veena)
         // Set up the token maker after the first screen is showing, so the
         // web view it needs doesn't slow down opening the app.
         thread(name = "token-warm-up") {

@@ -5,11 +5,12 @@ use std::path::Path;
 use rodio::Decoder;
 use veena_core::{Stream, StreamLocation};
 
-use crate::{AudioError, HttpReader, PrefetchReader};
+use crate::{AudioError, CacheWriter, CachedReader, HttpReader, PrefetchReader};
 
 /// Byte source for the decoder: a local file or an HTTP stream.
 pub(crate) enum Input {
     File(File),
+    Cached(CachedReader),
     Http(PrefetchReader),
 }
 
@@ -17,6 +18,7 @@ impl Read for Input {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             Input::File(f) => f.read(buf),
+            Input::Cached(c) => c.read(buf),
             Input::Http(h) => h.read(buf),
         }
     }
@@ -26,6 +28,7 @@ impl Seek for Input {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         match self {
             Input::File(f) => f.seek(pos),
+            Input::Cached(c) => c.seek(pos),
             Input::Http(h) => h.seek(pos),
         }
     }
@@ -33,15 +36,25 @@ impl Seek for Input {
 
 /// Open a stream and prepare a decoder for it. This blocks on file or
 /// network I/O, so the engine calls it off its control thread.
-pub(crate) fn open(stream: &Stream) -> Result<Decoder<Input>, AudioError> {
+/// Open a stream for decoding. `cache` keeps a network stream for offline
+/// listening once it has downloaded in full.
+pub(crate) fn open(
+    stream: &Stream,
+    cache: Option<CacheWriter>,
+) -> Result<Decoder<Input>, AudioError> {
     let (input, len, seekable, hint, mime) = match &stream.location {
         StreamLocation::File(path) => {
             let file = File::open(path)?;
             let len = file.metadata()?.len();
             (Input::File(file), Some(len), true, extension(path), None)
         }
+        StreamLocation::Cached(path) => {
+            let reader = CachedReader::open(path)?;
+            let len = reader.len();
+            (Input::Cached(reader), Some(len), true, None, None)
+        }
         StreamLocation::Http { url, headers } => {
-            let reader = PrefetchReader::new(HttpReader::open(url, headers)?);
+            let reader = PrefetchReader::new(HttpReader::open(url, headers)?, cache);
             let path = url.split(['?', '#']).next().unwrap_or(url);
             let (len, seekable) = (reader.byte_len(), reader.is_seekable());
             let mime = reader.content_type().map(str::to_owned);
@@ -123,7 +136,7 @@ mod tests {
     fn decodes_local_file() {
         let path = std::env::temp_dir().join(format!("veena-test-{}.wav", std::process::id()));
         std::fs::write(&path, wav()).unwrap();
-        let mut decoder = open(&Stream::file(&path)).unwrap();
+        let mut decoder = open(&Stream::file(&path), None).unwrap();
         std::fs::remove_file(&path).unwrap();
 
         assert_eq!(decoder.sample_rate(), 8000);
@@ -138,7 +151,7 @@ mod tests {
     fn rejects_non_audio() {
         let path = std::env::temp_dir().join(format!("veena-test-{}.txt", std::process::id()));
         std::fs::write(&path, b"not audio").unwrap();
-        let result = open(&Stream::file(&path));
+        let result = open(&Stream::file(&path), None);
         std::fs::remove_file(&path).unwrap();
         assert!(matches!(result, Err(AudioError::Decode(_))));
     }

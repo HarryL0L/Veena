@@ -56,7 +56,17 @@ data class SearchUiState(
     }
 }
 
-class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub) : ViewModel() {
+class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub, private val settingsStore: Settings) : ViewModel() {
+    val settings: StateFlow<SettingsState> = settingsStore.state
+
+    fun updateSettings(change: (SettingsState) -> SettingsState) {
+        settingsStore.update(change)
+        library.refreshCache()
+    }
+
+    /** Installed bricks, for the settings page. */
+    fun bricks() = hub.veena.plugins()
+
     private val _search = MutableStateFlow(SearchUiState())
     val search: StateFlow<SearchUiState> = _search.asStateFlow()
 
@@ -96,6 +106,17 @@ class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub) : Vie
     fun search() {
         val query = _search.value.query.trim()
         if (query.isEmpty()) return
+        if (settings.value.offline) {
+            // Offline: look through the songs kept on this device.
+            val words = query.lowercase().split(Regex("\\s+"))
+            val found = library.cached.value.filter { t ->
+                val text = listOfNotNull(t.title, t.artist, t.album).joinToString(" ").lowercase()
+                words.all { it in text }
+            }
+            _search.update { it.copy(results = found, searching = false, section = Section.MUSIC) }
+            if (found.isEmpty()) _messages.value = UiMessage("No saved songs match \"$query\"")
+            return
+        }
         _search.update { it.copy(searching = true) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { hub.veena.search(query) } }
@@ -201,7 +222,7 @@ class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub) : Vie
         }
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
-            initializer { (this[APPLICATION_KEY] as VeenaApp).let { PlayerViewModel(it.hub, it.library) } }
+            initializer { (this[APPLICATION_KEY] as VeenaApp).let { PlayerViewModel(it.hub, it.library, it.settings) } }
         }
     }
 }

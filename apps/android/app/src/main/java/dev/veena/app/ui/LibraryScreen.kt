@@ -63,6 +63,10 @@ sealed interface SongList {
         override val title = "Recently played"
     }
 
+    data object Offline : SongList {
+        override val title = "Kept on this phone"
+    }
+
     data class Playlist(val id: String, override val title: String) : SongList
 }
 
@@ -72,6 +76,7 @@ fun LibraryScreen(viewModel: PlayerViewModel, onOpen: (SongList) -> Unit) {
     val liked by viewModel.library.liked.collectAsStateWithLifecycle()
     val history by viewModel.library.history.collectAsStateWithLifecycle()
     val playlists by viewModel.library.playlists.collectAsStateWithLifecycle()
+    val cached by viewModel.library.cached.collectAsStateWithLifecycle()
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -93,6 +98,11 @@ fun LibraryScreen(viewModel: PlayerViewModel, onOpen: (SongList) -> Unit) {
             item {
                 LibraryRow("Recently played", songs(history.size), history.firstOrNull()?.artwork, R.drawable.ic_bedtime) {
                     onOpen(SongList.History)
+                }
+            }
+            item {
+                LibraryRow("Kept on this phone", songs(cached.size), cached.firstOrNull()?.artwork, R.drawable.ic_offline_pin) {
+                    onOpen(SongList.Offline)
                 }
             }
             if (playlists.isNotEmpty()) item { SectionTitle("Playlists") }
@@ -152,6 +162,7 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
     val liked by viewModel.library.liked.collectAsStateWithLifecycle()
     val history by viewModel.library.history.collectAsStateWithLifecycle()
     val playlists by viewModel.library.playlists.collectAsStateWithLifecycle()
+    val cached by viewModel.library.cached.collectAsStateWithLifecycle()
     var playlistTracks by remember(collection) { mutableStateOf<List<TrackInfo>>(emptyList()) }
     if (collection is SongList.Playlist) {
         // Reload when the playlist changes (songs added or removed).
@@ -162,6 +173,7 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
     val tracks = when (collection) {
         SongList.Liked -> liked
         SongList.History -> history
+        SongList.Offline -> cached
         is SongList.Playlist -> playlistTracks
     }
     var renaming by remember { mutableStateOf(false) }
@@ -192,6 +204,10 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
                                 menu = false
                                 tracks.forEach(actions.onAddToQueue)
                             })
+                            SongList.Offline -> DropdownMenuItem(text = { Text("Clear all") }, onClick = {
+                                menu = false
+                                viewModel.library.clearCache()
+                            })
                         }
                     }
                 }
@@ -205,7 +221,17 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
                 } else {
                     Surface(Modifier.size(220.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(painterResource(if (collection is SongList.Liked) R.drawable.ic_favorite else R.drawable.ic_queue_music), contentDescription = null, modifier = Modifier.size(72.dp))
+                            Icon(
+                                painterResource(
+                                    when (collection) {
+                                        SongList.Liked -> R.drawable.ic_favorite
+                                        SongList.Offline -> R.drawable.ic_offline_pin
+                                        else -> R.drawable.ic_queue_music
+                                    },
+                                ),
+                                contentDescription = null,
+                                modifier = Modifier.size(72.dp),
+                            )
                         }
                     }
                 }
@@ -231,6 +257,8 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
                     when (collection) {
                         SongList.Liked -> "Tap ♡ on a song to like it."
                         SongList.History -> "Nothing played yet."
+                        SongList.Offline -> "Songs you play in full are kept here, so they play without the internet. " +
+                            "They stay inside Veena; they aren't downloads."
                         is SongList.Playlist -> "Add songs with “Add to playlist…” in a song's menu."
                     },
                     style = MaterialTheme.typography.bodyLarge,
@@ -242,6 +270,7 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
         itemsIndexed(tracks, key = { i, t -> "$i:${t.kind}:${t.id}" }) { index, track ->
             val extra = when (collection) {
                 is SongList.Playlist -> listOf("Remove from playlist" to { viewModel.library.removeFromPlaylist(collection.id, index) })
+                SongList.Offline -> listOf("Remove from this phone" to { viewModel.library.removeFromCache(track) })
                 else -> emptyList()
             }
             TrackRow(track, actions, onClick = { viewModel.playList(tracks, index) }, showSource = false, extra = extra)

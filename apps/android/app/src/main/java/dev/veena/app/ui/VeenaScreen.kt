@@ -98,6 +98,8 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    val cached by viewModel.library.cached.collectAsStateWithLifecycle()
     var collection by remember { mutableStateOf<SongList?>(null) }
     var addingToPlaylist by remember { mutableStateOf<TrackInfo?>(null) }
 
@@ -118,6 +120,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
     val actions = TrackActions(
         playingId = playingId,
         isLiked = { t -> liked.any { it.kind == t.kind && it.id == t.id } },
+        isCached = { t -> cached.any { it.kind == t.kind && it.id == t.id } },
         onPlayNext = viewModel::playNext,
         onAddToQueue = viewModel::addToQueue,
         onToggleLike = viewModel::toggleLike,
@@ -131,10 +134,11 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                 NavigationBar {
                     Tab.entries.forEach { item ->
                         NavigationBarItem(
-                            selected = tab == item && collection == null,
+                            selected = tab == item && collection == null && !showSettings,
                             onClick = {
                                 tab = item
                                 collection = null
+                                showSettings = false
                             },
                             icon = { Icon(painterResource(item.icon), contentDescription = null) },
                             label = { Text(item.label) },
@@ -151,6 +155,18 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
           CompositionLocalProvider(LocalMiniPlayerSpace provides miniPlayerSpace) {
             val open = collection
             when {
+                showSettings -> {
+                    BackHandler { showSettings = false }
+                    SettingsScreen(
+                        viewModel = viewModel,
+                        onBack = { showSettings = false },
+                        onLogs = { showLogs = true },
+                        onOpenSaved = {
+                            showSettings = false
+                            collection = SongList.Offline
+                        },
+                    )
+                }
                 open != null -> {
                     BackHandler { collection = null }
                     CollectionScreen(
@@ -165,7 +181,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                     actions = actions,
                     onOpen = { collection = it },
                     onSearch = { tab = Tab.SEARCH },
-                    onLogs = { showLogs = true },
+                    onSettings = { showSettings = true },
                 )
                 tab == Tab.SEARCH -> SearchScreen(viewModel, actions, onLogs = { showLogs = true })
                 else -> LibraryScreen(viewModel, onOpen = { collection = it })
@@ -230,6 +246,8 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
 class TrackActions(
     val playingId: String?,
     val isLiked: (TrackInfo) -> Boolean,
+    /** Kept on this phone for offline listening. */
+    val isCached: (TrackInfo) -> Boolean,
     val onPlayNext: (TrackInfo) -> Unit,
     val onAddToQueue: (TrackInfo) -> Unit,
     val onToggleLike: (TrackInfo) -> Unit,
@@ -243,13 +261,14 @@ class TrackActions(
 @Composable
 private fun SearchScreen(viewModel: PlayerViewModel, actions: TrackActions, onLogs: () -> Unit) {
     val search by viewModel.search.collectAsStateWithLifecycle()
+    val offline = viewModel.settings.collectAsStateWithLifecycle().value.offline
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 8.dp)) {
             OutlinedTextField(
                 value = search.query,
                 onValueChange = viewModel::onQueryChange,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search songs") },
+                placeholder = { Text(if (offline) "Search songs kept on this phone" else "Search songs") },
                 leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
                 trailingIcon = {
                     IconButton(onClick = onLogs) {
@@ -329,11 +348,22 @@ fun TrackRow(
             onLongClickLabel = "More options",
             modifier = Modifier.padding(horizontal = 8.dp),
             supportingContent = {
-                Text(
-                    listOfNotNull(track.artist, track.source.takeIf { showSource && it.isNotEmpty() }).joinToString(" · "),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (actions.isCached(track)) {
+                        Icon(
+                            painterResource(R.drawable.ic_offline_pin),
+                            contentDescription = "Kept on this phone",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp).padding(end = 2.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        listOfNotNull(track.artist, track.source.takeIf { showSource && it.isNotEmpty() }).joinToString(" · "),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             },
             leadingContent = { Artwork(track.artwork, 52) },
             trailingContent = {

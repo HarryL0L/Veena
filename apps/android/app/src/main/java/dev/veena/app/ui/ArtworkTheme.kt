@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.util.LruCache
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
@@ -40,7 +39,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ArtworkTheme(artwork: String?, content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val dark = isSystemInDarkTheme()
+    val dark = LocalDarkTheme.current
     val base = MaterialTheme.colorScheme
     var from by remember { mutableStateOf(base) }
     var to by remember { mutableStateOf(base) }

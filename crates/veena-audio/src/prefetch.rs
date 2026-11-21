@@ -11,7 +11,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use crate::HttpReader;
+use crate::{CacheWriter, HttpReader};
 
 /// How far ahead of the decoder the download runs.
 const READ_AHEAD: u64 = 8 * 1024 * 1024;
@@ -60,7 +60,8 @@ impl State {
 
 impl PrefetchReader {
     /// Start downloading from `reader`'s current position (the start).
-    pub fn new(reader: HttpReader) -> Self {
+    /// `cache`, if given, keeps the song once it has downloaded in full.
+    pub fn new(reader: HttpReader, cache: Option<CacheWriter>) -> Self {
         let len = reader.byte_len();
         let seekable = reader.is_seekable();
         let content_type = reader.content_type().map(str::to_owned);
@@ -79,7 +80,7 @@ impl PrefetchReader {
         let worker = shared.clone();
         thread::Builder::new()
             .name("veena-download".into())
-            .spawn(move || download(reader, &worker))
+            .spawn(move || download(reader, &worker, cache))
             .expect("start download thread");
         Self {
             shared,
@@ -108,9 +109,11 @@ impl PrefetchReader {
 }
 
 /// The download thread: fill the buffer, restarting where the decoder asks.
-fn download(mut reader: HttpReader, shared: &Shared) {
+fn download(mut reader: HttpReader, shared: &Shared, mut cache: Option<CacheWriter>) {
+    let total = reader.byte_len();
     let mut chunk = vec![0u8; READ_SIZE];
     loop {
+        let offset;
         {
             let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
             loop {
@@ -118,6 +121,10 @@ fn download(mut reader: HttpReader, shared: &Shared) {
                     return;
                 }
                 if let Some(pos) = state.restart.take() {
+                    // A jump elsewhere: the song can't be kept whole this time.
+                    if let Some(writer) = cache.as_mut() {
+                        writer.abandon();
+                    }
                     state.base = pos;
                     state.data.clear();
                     state.done = false;
@@ -138,10 +145,11 @@ fn download(mut reader: HttpReader, shared: &Shared) {
                     .wait(state)
                     .unwrap_or_else(|e| e.into_inner());
             }
+            offset = state.end();
         }
 
-        // The network read happens without the lock, so the decoder can keep
-        // copying what is already here.
+        // The network read and the cache writes happen without the lock, so
+        // the decoder can keep copying what is already here.
         let result = reader.read(&mut chunk);
 
         let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -149,10 +157,23 @@ fn download(mut reader: HttpReader, shared: &Shared) {
             // The decoder moved elsewhere while this was read: drop it.
             continue;
         }
+        let mut finished = false;
+        let mut failed = false;
+        let mut received = 0;
         match result {
-            Ok(0) => state.done = true,
+            Ok(0) => {
+                state.done = true;
+                finished = true;
+            }
             Ok(n) => {
+                received = n;
                 state.data.extend_from_slice(&chunk[..n]);
+                // The whole file is here: keep it now, without waiting for
+                // the decoder (which may close the stream at the last byte).
+                if total == Some(state.end()) {
+                    state.done = true;
+                    finished = true;
+                }
                 // Forget data well behind the decoder.
                 let behind = state.reader_pos.saturating_sub(state.base);
                 if behind > KEEP_BEHIND * 2 {
@@ -165,9 +186,23 @@ fn download(mut reader: HttpReader, shared: &Shared) {
             Err(e) => {
                 state.error = Some(e.to_string());
                 state.done = true;
+                failed = true;
             }
         }
         shared.changed.notify_all();
+        drop(state);
+
+        if let Some(writer) = cache.as_mut() {
+            if received > 0 {
+                writer.write_at(offset, &chunk[..received]);
+            }
+            if failed {
+                writer.abandon();
+            }
+        }
+        if finished && let Some(writer) = cache.take() {
+            writer.finish(total);
+        }
     }
 }
 
@@ -255,7 +290,7 @@ mod tests {
     fn reader() -> (PrefetchReader, Vec<u8>) {
         let data = data();
         let http = HttpReader::open(&serve(data.clone(), true), &[]).unwrap();
-        (PrefetchReader::new(http), data)
+        (PrefetchReader::new(http, None), data)
     }
 
     #[test]
@@ -278,5 +313,43 @@ mod tests {
         }
         reader.seek(SeekFrom::End(0)).unwrap();
         assert_eq!(reader.read(&mut buf).unwrap(), 0);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use crate::http::tests::{data, serve};
+    use crate::{AudioCache, CachedReader};
+    use veena_core::{StreamLocation, Track, TrackId};
+
+    #[test]
+    fn a_song_played_through_is_kept_for_offline_listening() {
+        let dir = std::env::temp_dir().join(format!("veena-prefetch-cache-{}", std::process::id()));
+        let cache = AudioCache::open(&dir, 64 << 20);
+        let track = Track::new(TrackId::new("test", "song"), "Song");
+        let data = data();
+        let http = HttpReader::open(&serve(data.clone(), true), &[]).unwrap();
+        let mut reader = PrefetchReader::new(http, cache.writer(&track, None));
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        drop(reader);
+        // The download thread finishes the cache file just after the last read.
+        for _ in 0..50 {
+            if cache.contains(&track) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let StreamLocation::Cached(path) = cache.lookup(&track).expect("kept").location else {
+            panic!("not a cached stream");
+        };
+        let mut back = Vec::new();
+        CachedReader::open(&path)
+            .unwrap()
+            .read_to_end(&mut back)
+            .unwrap();
+        assert_eq!(back, data);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

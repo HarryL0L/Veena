@@ -3,13 +3,14 @@
 //! [`Player`] is the single entry point a user interface needs. Commands are
 //! fire-and-forget; state changes arrive as [`PlayerEvent`]s.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 use veena_audio::{AudioEngine, AudioEvent};
-use veena_core::{Queue, Repeat, SourceRegistry, Stream, Track};
+use veena_core::{Queue, Repeat, SourceRegistry, Stream, StreamLocation, Track};
 
-pub use veena_audio::{AudioError, PlaybackState};
+pub use veena_audio::{AudioCache, AudioError, PlaybackState};
 
 /// "Previous" restarts the current track if it has played longer than this.
 const RESTART_THRESHOLD: Duration = Duration::from_secs(3);
@@ -87,6 +88,17 @@ impl Player {
     ///
     /// Must be called from within a Tokio runtime.
     pub fn new(registry: SourceRegistry) -> Result<Self, AudioError> {
+        Self::with_cache(registry, None)
+    }
+
+    /// Like [`Player::new`], keeping songs in `cache` as they stream and
+    /// playing from it when it has them.
+    ///
+    /// Must be called from within a Tokio runtime.
+    pub fn with_cache(
+        registry: SourceRegistry,
+        cache: Option<Arc<AudioCache>>,
+    ) -> Result<Self, AudioError> {
         let (messages, inbox) = mpsc::unbounded_channel();
         let (events, _) = broadcast::channel(256);
 
@@ -97,6 +109,7 @@ impl Player {
 
         let actor = Actor {
             registry,
+            cache,
             queue: Queue::new(),
             engine,
             events: events.clone(),
@@ -218,6 +231,7 @@ impl Drop for Player {
 
 /// Owns all player state; runs as a single task so no locking is needed.
 struct Actor {
+    cache: Option<Arc<AudioCache>>,
     registry: SourceRegistry,
     queue: Queue,
     engine: AudioEngine,
@@ -370,7 +384,14 @@ impl Actor {
                 match result {
                     Ok(stream) => {
                         self.awaiting_audio = true;
-                        self.engine.load(stream, self.autoplay);
+                        // Keep network songs for offline listening.
+                        let writer = match (&self.cache, &stream.location, self.queue.current()) {
+                            (Some(cache), StreamLocation::Http { .. }, Some(track)) => {
+                                cache.writer(track, stream.mime.clone())
+                            }
+                            _ => None,
+                        };
+                        self.engine.load(stream, self.autoplay, writer);
                     }
                     Err(e) => self.track_failed(e),
                 }
@@ -441,9 +462,26 @@ impl Actor {
         });
         self.set_state(PlaybackState::Loading);
 
-        let registry = self.registry.clone();
         let loopback = self.loopback.clone();
         let generation = self.generation;
+        if let Some(cache) = &self.cache {
+            // Saved songs play from the cache, with or without the internet.
+            if let Some(stream) = cache.lookup(&track) {
+                let _ = loopback.send(Message::Resolved {
+                    generation,
+                    result: Ok(stream),
+                });
+                return;
+            }
+            if cache.offline() {
+                let _ = loopback.send(Message::Resolved {
+                    generation,
+                    result: Err("not saved for offline listening".into()),
+                });
+                return;
+            }
+        }
+        let registry = self.registry.clone();
         tokio::spawn(async move {
             let result = registry
                 .resolve(&track)

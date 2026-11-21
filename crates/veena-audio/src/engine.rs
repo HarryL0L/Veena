@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 use veena_core::Stream;
 
-use crate::AudioError;
 use crate::decode::{self, Input};
+use crate::{AudioError, CacheWriter};
 
 /// How often the engine checks for the end of a track.
 const TICK: Duration = Duration::from_millis(50);
@@ -39,6 +39,7 @@ enum Command {
     Load {
         stream: Stream,
         autoplay: bool,
+        cache: Option<Box<CacheWriter>>,
     },
     Loaded {
         generation: u64,
@@ -97,8 +98,14 @@ impl AudioEngine {
     }
 
     /// Start loading a stream, replacing whatever is playing.
-    pub fn load(&self, stream: Stream, autoplay: bool) {
-        self.send(Command::Load { stream, autoplay });
+    /// Play `stream`. `cache`, if given, keeps a network stream for offline
+    /// listening once it has downloaded in full.
+    pub fn load(&self, stream: Stream, autoplay: bool, cache: Option<CacheWriter>) {
+        self.send(Command::Load {
+            stream,
+            autoplay,
+            cache: cache.map(Box::new),
+        });
     }
 
     pub fn play(&self) {
@@ -226,13 +233,17 @@ impl Worker {
 
     fn handle(&mut self, command: Command) {
         match command {
-            Command::Load { stream, autoplay } => {
+            Command::Load {
+                stream,
+                autoplay,
+                cache,
+            } => {
                 self.clear();
                 self.set_state(PlaybackState::Loading);
                 let generation = self.generation;
                 let loopback = self.loopback.clone();
                 thread::spawn(move || {
-                    let result = decode::open(&stream);
+                    let result = decode::open(&stream, cache.map(|c| *c));
                     let _ = loopback.send(Command::Loaded {
                         generation,
                         autoplay,

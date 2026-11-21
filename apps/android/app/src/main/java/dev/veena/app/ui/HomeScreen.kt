@@ -45,8 +45,10 @@ fun HomeScreen(
     actions: TrackActions,
     onOpen: (SongList) -> Unit,
     onSearch: () -> Unit,
-    onLogs: () -> Unit,
+    onSettings: () -> Unit,
 ) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val cached by viewModel.library.cached.collectAsStateWithLifecycle()
     val history by viewModel.library.history.collectAsStateWithLifecycle()
     val liked by viewModel.library.liked.collectAsStateWithLifecycle()
     val playlists by viewModel.library.playlists.collectAsStateWithLifecycle()
@@ -55,7 +57,30 @@ fun HomeScreen(
         item {
             Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 8.dp, top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(greeting(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                IconButton(onClick = onLogs) { Icon(painterResource(R.drawable.ic_bug), contentDescription = "Logs") }
+                IconButton(onClick = onSettings) { Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings") }
+            }
+        }
+
+        if (settings.offline) {
+            item {
+                Surface(
+                    onClick = { onOpen(SongList.Offline) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(painterResource(R.drawable.ic_cloud_off), contentDescription = null)
+                        Spacer(Modifier.size(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Offline mode", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Playing only the ${songs(cached.size)} kept on this phone. Turn it off in Settings.",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -101,6 +126,16 @@ fun HomeScreen(
                         artwork = liked.firstOrNull()?.artwork,
                         icon = R.drawable.ic_favorite,
                     ) { onOpen(SongList.Liked) }
+                }
+                if (cached.isNotEmpty()) {
+                    item {
+                        CollectionCard(
+                            title = "Kept on this phone",
+                            subtitle = songs(cached.size),
+                            artwork = cached.firstOrNull()?.artwork,
+                            icon = R.drawable.ic_offline_pin,
+                        ) { onOpen(SongList.Offline) }
+                    }
                 }
                 items(playlists, key = { it.id }) { list ->
                     CollectionCard(
