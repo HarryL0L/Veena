@@ -107,6 +107,13 @@ Plugins update automatically and securely:
 | Swap | The new version loads instantly. |
 | Recover | If it fails, Veena returns to the previous version. |
 
+Updates are published by the **Publish bricks** workflow whenever a file in
+`plugins/` changes: it signs the bricks and puts them in the
+[`bricks` release](../../releases/tag/bricks), which both apps check. A brick
+must get a higher `version` in its `meta` when its code changes, or the
+workflow refuses to publish it. The signing key is the `VEENA_BRICK_KEY`
+repository secret; its public key is built into the apps.
+
 Plugins can only reach the domains they declare. They have no file system access.
 
 On Linux, `yt-dlp` will be available as an optional fallback that stays up to date automatically.

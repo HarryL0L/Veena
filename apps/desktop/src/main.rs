@@ -72,6 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     veena.clone().set_listener(Box::new(Listener));
     // Media keys and the desktop's media controls.
     mpris::start(window.as_weak());
+    // Screenshots stay offline-quiet.
+    if options.screenshot.is_none() {
+        check_brick_updates(veena.clone());
+    }
 
     if let Some(shot) = options.screenshot.clone() {
         run_screenshot(&window, shot, options);
@@ -707,16 +711,37 @@ fn dir(env: &str, fallback: &str) -> PathBuf {
 }
 
 /// Copy the bundled bricks in, unless the updater manages a newer version.
-fn install_bundled_bricks(dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    let managed = std::fs::read_to_string(dir.join("state.json")).unwrap_or_default();
-    for (name, code) in BUNDLED {
-        let id = name.trim_end_matches(".js");
-        if !managed.contains(&format!("\"{id}\"")) {
-            std::fs::write(dir.join(name), code)?;
-        }
+/// Put the app's bricks in the plugin folder; a newer downloaded brick is
+/// kept (the core decides which is newer).
+fn install_bundled_bricks(dir: &Path) -> Result<(), veena_ffi::VeenaError> {
+    let bricks = BUNDLED
+        .iter()
+        .map(|(name, code)| veena_ffi::BundledBrick {
+            name: (*name).to_owned(),
+            code: (*code).to_owned(),
+        })
+        .collect();
+    veena_ffi::install_bundled_bricks(dir.display().to_string(), bricks)
+}
+
+/// Check for signed brick updates now and then once a day, while the app
+/// runs. New bricks are swapped in without restarting.
+fn check_brick_updates(veena: Arc<Veena>) {
+    let (url, key) = (veena_ffi::brick_update_url(), veena_ffi::brick_update_key());
+    if url.is_empty() || key.is_empty() {
+        return;
     }
-    Ok(())
+    let _ = std::thread::Builder::new()
+        .name("brick-updates".into())
+        .spawn(move || {
+            loop {
+                match veena.update_plugins(url.clone(), key.clone()) {
+                    Ok(report) => eprintln!("veena: brick update: {report}"),
+                    Err(e) => eprintln!("veena: brick update failed: {e}"),
+                }
+                std::thread::sleep(Duration::from_secs(24 * 3600));
+            }
+        });
 }
 
 fn clock(ms: u64) -> String {

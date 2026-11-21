@@ -4,7 +4,9 @@ import android.app.Application
 import android.util.Log
 import java.io.File
 import kotlin.concurrent.thread
+import uniffi.veena_ffi.BundledBrick
 import uniffi.veena_ffi.Veena
+import uniffi.veena_ffi.installBundledBricks
 import uniffi.veena_ffi.setTokenMinter
 
 /** Starts the Rust core once for the whole app. */
@@ -38,25 +40,18 @@ class VeenaApp : Application() {
     }
 
     /**
-     * Copy the bricks shipped in the APK into the plugin folder, and remove
-     * bricks an earlier version shipped but this one no longer does. Bricks
-     * the updater manages (listed in state.json) are left alone, so a newer
-     * downloaded version is never replaced or removed.
+     * Put the bricks shipped in the APK in the plugin folder. Whichever is
+     * newer wins: a brick downloaded since is kept, and a newer one in the
+     * APK replaces an older download (the core decides; see
+     * `install_bundled_bricks`).
      */
     private fun installBundledPlugins() {
-        val dir = File(filesDir, "plugins").apply { mkdirs() }
-        val managed = File(dir, "state.json").takeIf { it.exists() }?.readText() ?: ""
-        val bundled = assets.list("plugins").orEmpty().filter { it.endsWith(".js") }
-        for (name in bundled) {
-            val id = name.removeSuffix(".js")
-            if (managed.contains("\"$id\"")) continue
-            assets.open("plugins/$name").use { input ->
-                File(dir, name).outputStream().use { input.copyTo(it) }
-            }
+        val dir = File(filesDir, "plugins")
+        val bundled = assets.list("plugins").orEmpty().filter { it.endsWith(".js") }.map { name ->
+            BundledBrick(name, assets.open("plugins/$name").bufferedReader().use { it.readText() })
         }
-        dir.listFiles { file -> file.name.endsWith(".js") }.orEmpty()
-            .filter { it.name !in bundled && !managed.contains("\"${it.nameWithoutExtension}\"") }
-            .forEach { it.delete() }
-        Log.i("veena", "bundled bricks: ${bundled.joinToString()}")
+        runCatching { installBundledBricks(dir.absolutePath, bundled) }
+            .onFailure { Log.w("veena", "could not install bundled bricks: ${it.message}") }
+        Log.i("veena", "bundled bricks: ${bundled.joinToString { it.name }}")
     }
 }

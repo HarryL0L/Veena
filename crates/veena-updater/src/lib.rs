@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 pub use install::{Report, Updater, load_installed};
 pub use keys::{generate_signing_key, parse_public_key, parse_signing_key, public_key_of, sign};
-pub use manifest::{Manifest, ManifestEntry, PluginSettings, sha256_hex};
+pub use manifest::{Manifest, ManifestEntry, PluginSettings, compare_versions, sha256_hex};
 pub use state::{InstalledPlugin, State};
 
 /// Version of the manifest format this app reads.

@@ -1,0 +1,100 @@
+name: Publish bricks
+
+# Signs the bricks in plugins/ and publishes them to the "bricks" release.
+# Installed apps check https://github.com/<owner>/<repo>/releases/download/bricks/manifest.json
+# once a day and swap in newer bricks without an app update.
+#
+# Needs the repository secret VEENA_BRICK_KEY: a base64 Ed25519 signing key
+# (32 random bytes, e.g. `head -c 32 /dev/urandom | base64 -w0`). Its public
+# key is printed by this workflow and built into the apps.
+
+on:
+  push:
+    branches: [main, ccr-3f814d11-1hbsff]
+    paths: ["plugins/**", ".github/workflows/bricks.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-bricks
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Sign and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check for the signing key
+        id: key
+        env:
+          KEY: ${{ secrets.VEENA_BRICK_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::warning::No VEENA_BRICK_KEY secret yet; nothing published."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.key.outputs.present == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.key.outputs.present == 'true'
+      - name: Build the signing tool
+        if: steps.key.outputs.present == 'true'
+        run: cargo build --release -p veena-sign
+      - name: Sign the bricks
+        if: steps.key.outputs.present == 'true'
+        env:
+          KEY: ${{ secrets.VEENA_BRICK_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/brick.key"
+          echo "Public key (built into the apps):"
+          target/release/veena-sign public --key "$RUNNER_TEMP/brick.key" | tee site-public-key.txt
+          target/release/veena-sign publish --key "$RUNNER_TEMP/brick.key" --plugins plugins --out site
+          rm -f "$RUNNER_TEMP/brick.key"
+          mv site-public-key.txt site/public-key.txt
+      - name: Refuse changed bricks with an old version number
+        # Apps only install a brick whose version is newer, so changed code
+        # under the same version would never reach anyone.
+        if: steps.key.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release download bricks --pattern manifest.json --dir previous 2>/dev/null; then
+            echo "First publication."
+            exit 0
+          fi
+          bad=$(jq -r --slurpfile old previous/manifest.json '
+            .plugins[] as $new
+            | ($old[0].plugins[] | select(.id == $new.id)) as $was
+            | select($was.version == $new.version and $was.sha256 != $new.sha256)
+            | "\($new.id) \($new.version)"' site/manifest.json)
+          if [ -n "$bad" ]; then
+            echo "::error::These bricks changed but kept their version; raise version in their meta: $bad"
+            exit 1
+          fi
+      - name: Publish to the bricks release
+        if: steps.key.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view bricks > /dev/null 2>&1; then
+            gh release create bricks --title "Bricks" --latest=false \
+              --notes "Signed brick updates. Veena checks manifest.json here once a day." \
+              --target "$GITHUB_SHA"
+          fi
+          # Brick files first, the manifest last, so a phone never reads a
+          # manifest whose files aren't there yet.
+          gh release upload bricks site/*.js site/public-key.txt --clobber
+          gh release upload bricks site/manifest.json.sig site/manifest.json --clobber
+          echo "Published:"
+          jq -r '.plugins[] | "  \(.id) \(.version)"' site/manifest.json

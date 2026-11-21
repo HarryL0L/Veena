@@ -920,6 +920,94 @@ fn init_logging() {
     });
 }
 
+// ---------------------------------------------------------------- Bricks
+
+/// Where signed brick updates are published (a GitHub release).
+const BRICK_UPDATE_URL: &str =
+    "https://github.com/HarryL0L/Veena-music/releases/download/bricks/manifest.json";
+/// The public key brick updates must be signed with. Empty until the
+/// publishing key is set up; then updates are switched on.
+const BRICK_UPDATE_KEY: &str = "";
+
+/// The address apps check for brick updates.
+#[uniffi::export]
+pub fn brick_update_url() -> String {
+    BRICK_UPDATE_URL.to_owned()
+}
+
+/// The public key brick updates are checked against; empty means updates
+/// are off in this build.
+#[uniffi::export]
+pub fn brick_update_key() -> String {
+    BRICK_UPDATE_KEY.to_owned()
+}
+
+/// A brick shipped inside the app.
+#[derive(uniffi::Record)]
+pub struct BundledBrick {
+    /// File name, e.g. `youtube-music.js`.
+    pub name: String,
+    pub code: String,
+}
+
+/// Put the app's own bricks in the plugin folder before the core starts.
+///
+/// A brick is written unless a newer version of it was downloaded since:
+/// whichever is newer wins, so a new app never runs an older downloaded
+/// brick, and an old app never undoes a newer download. Bricks an earlier
+/// app shipped but this one doesn't (and nothing downloaded) are removed.
+#[uniffi::export]
+pub fn install_bundled_bricks(dir: String, bricks: Vec<BundledBrick>) -> Result<(), VeenaError> {
+    use veena_updater::{State, compare_versions};
+    let dir = PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).map_err(VeenaError::new)?;
+    let mut state = State::load(&dir).unwrap_or_default();
+    let mut state_changed = false;
+    for brick in &bricks {
+        let id = brick.name.trim_end_matches(".js");
+        if let Some(installed) = state.plugins.get_mut(id) {
+            let bundled = brick_version(&brick.code).unwrap_or_default();
+            if compare_versions(&bundled, &installed.version).is_le() {
+                continue;
+            }
+            // The app ships a newer one: it becomes the installed version.
+            installed.version = bundled;
+            state_changed = true;
+        }
+        std::fs::write(dir.join(&brick.name), &brick.code).map_err(VeenaError::new)?;
+    }
+    if state_changed {
+        state.save(&dir).map_err(VeenaError::new)?;
+    }
+    let shipped: Vec<&str> = bricks.iter().map(|b| b.name.as_str()).collect();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for path in entries.filter_map(|e| e.ok().map(|e| e.path())) {
+            let (Some(name), Some(stem)) = (
+                path.file_name().and_then(|n| n.to_str()),
+                path.file_stem().and_then(|n| n.to_str()),
+            ) else {
+                continue;
+            };
+            if name.ends_with(".js")
+                && !shipped.contains(&name)
+                && !state.plugins.contains_key(stem)
+            {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The `version: "…"` in a brick's `meta`.
+fn brick_version(code: &str) -> Option<String> {
+    let start = code.find("version:")? + "version:".len();
+    let rest = code[start..].trim_start();
+    let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    let rest = &rest[1..];
+    Some(rest[..rest.find(quote)?].to_owned())
+}
+
 /// The latest log lines (times in UTC), oldest first.
 #[uniffi::export]
 pub fn recent_logs() -> Vec<String> {
@@ -954,6 +1042,42 @@ mod tests {
     }
 
     /// Half a second of silence as a WAV file.
+    #[test]
+    fn bundled_bricks_never_replace_a_newer_download() {
+        let dir = std::env::temp_dir().join(format!("veena-bundled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let brick = |version: &str| BundledBrick {
+            name: "music.js".into(),
+            code: format!("export const meta = {{ id: \"music\", version: \"{version}\" }};"),
+        };
+        // A downloaded 1.2.0 is kept over a bundled 1.1.0...
+        std::fs::write(
+            dir.join("state.json"),
+            r#"{"plugins":{"music":{"version":"1.2.0"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("music.js"), "downloaded").unwrap();
+        std::fs::write(dir.join("old.js"), "gone").unwrap();
+        let path = dir.display().to_string();
+        install_bundled_bricks(path.clone(), vec![brick("1.1.0")]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("music.js")).unwrap(),
+            "downloaded"
+        );
+        assert!(!dir.join("old.js").exists());
+        // ...but a bundled 1.3.0 replaces it.
+        install_bundled_bricks(path, vec![brick("1.3.0")]).unwrap();
+        assert!(
+            std::fs::read_to_string(dir.join("music.js"))
+                .unwrap()
+                .contains("1.3.0")
+        );
+        let state = veena_updater::State::load(&dir).unwrap();
+        assert_eq!(state.plugins["music"].version, "1.3.0");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn wav() -> Vec<u8> {
         let (rate, samples) = (8000u32, 4000u32);
         let mut out = b"RIFF".to_vec();

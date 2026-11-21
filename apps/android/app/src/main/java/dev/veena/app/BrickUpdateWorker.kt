@@ -12,6 +12,8 @@ import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import uniffi.veena_ffi.brickUpdateKey
+import uniffi.veena_ffi.brickUpdateUrl
 
 /**
  * Checks once a day for new signed bricks and installs them. The app itself
@@ -20,7 +22,7 @@ import kotlinx.coroutines.withContext
 class BrickUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val veena = (applicationContext as VeenaApp).veena
-        runCatching { veena.updatePlugins(BuildConfig.UPDATE_URL, BuildConfig.UPDATE_KEY) }
+        runCatching { veena.updatePlugins(updateUrl(), updateKey()) }
             .fold(
                 onSuccess = {
                     Log.i("veena", "brick update: $it")
@@ -34,9 +36,13 @@ class BrickUpdateWorker(context: Context, params: WorkerParameters) : CoroutineW
     }
 
     companion object {
-        /** Schedule the daily check, if this build has an update address. */
+        /** A build setting overrides the address built into the core. */
+        private fun updateUrl() = BuildConfig.UPDATE_URL.ifEmpty { brickUpdateUrl() }
+        private fun updateKey() = BuildConfig.UPDATE_KEY.ifEmpty { brickUpdateKey() }
+
+        /** Schedule the daily check, if this build has an update address and key. */
         fun schedule(context: Context) {
-            if (BuildConfig.UPDATE_URL.isEmpty() || BuildConfig.UPDATE_KEY.isEmpty()) return
+            if (updateUrl().isEmpty() || updateKey().isEmpty()) return
             val request = PeriodicWorkRequestBuilder<BrickUpdateWorker>(1, TimeUnit.DAYS)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()

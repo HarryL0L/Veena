@@ -89,7 +89,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Compare dotted numeric versions ("1.10.0" > "1.9.2"). Non-numeric parts
 /// compare as text.
-pub(crate) fn compare_versions(a: &str, b: &str) -> Ordering {
+pub fn compare_versions(a: &str, b: &str) -> Ordering {
     let parts = |v: &str| -> Vec<String> { v.split(['.', '-', '+']).map(str::to_owned).collect() };
     let (a, b) = (parts(a), parts(b));
     for i in 0..a.len().max(b.len()) {
