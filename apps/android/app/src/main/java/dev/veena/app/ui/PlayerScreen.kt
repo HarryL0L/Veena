@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,24 +29,33 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -55,7 +63,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -66,6 +76,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import dev.veena.app.R
+import dev.veena.app.SleepTimer
+import kotlinx.coroutines.delay
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import uniffi.veena_ffi.TrackInfo
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -91,6 +106,11 @@ fun PlayerScreen(
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
     onPlayQueueItem: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onMove: (from: Int, to: Int) -> Unit,
+    sleep: SleepTimer?,
+    onSleep: (minutes: Int?) -> Unit,
+    onCancelSleep: () -> Unit,
 ) {
     val currentIndex = player.current?.toInt() ?: return
     val track = player.queue.getOrNull(currentIndex) ?: return
@@ -125,7 +145,20 @@ fun PlayerScreen(
                 .offset { IntOffset(0, offset.value.roundToInt()) }
                 .background(Brush.verticalGradient(listOf(colors.primaryContainer, colors.surface, colors.surface))),
         ) {
+            // The queue as shown, reordered live while dragging and sent to
+            // the player when the drag ends.
+            val entriesState = remember(player.queue) {
+                mutableStateOf(player.queue.mapIndexed { i, t -> QueueEntry("q$i:${t.kind}:${t.id}", i, t) })
+            }
+            var entries by entriesState
+            val listState = rememberLazyListState()
+            val reorder = rememberReorderableLazyListState(listState) { from, to ->
+                val a = entries.indexOfFirst { it.key == from.key }
+                val b = entries.indexOfFirst { it.key == to.key }
+                if (a >= 0 && b >= 0) entries = entries.toMutableList().apply { add(b, removeAt(a)) }
+            }
             LazyColumn(
+                state = listState,
                 modifier = Modifier.systemBarsPadding(),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
@@ -144,12 +177,12 @@ fun PlayerScreen(
                                 color = colors.onSurfaceVariant,
                             )
                             Text(
-                                "${currentIndex + 1} of ${player.queue.size}",
+                                sleepLabel(sleep) ?: "${currentIndex + 1} of ${player.queue.size}",
                                 style = MaterialTheme.typography.titleSmall,
                                 textAlign = TextAlign.Center,
                             )
                         }
-                        Spacer(Modifier.size(48.dp))
+                        SleepMenu(sleep, onSleep, onCancelSleep)
                     }
                 }
 
@@ -219,31 +252,161 @@ fun PlayerScreen(
 
                 if (player.queue.size > 1) {
                     item {
-                        Text(
-                            "Up next",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                        )
-                    }
-                    itemsIndexed(player.queue, key = { i, t -> "q$i:${t.kind}:${t.id}" }) { index, item ->
-                        val isCurrent = index == currentIndex
-                        ListItem(
-                            selected = isCurrent,
-                            onClick = { onPlayQueueItem(index) },
-                            modifier = Modifier.padding(horizontal = 8.dp),
-                            supportingContent = item.artist?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
-                            leadingContent = { Artwork(item.artwork, 44) },
-                            trailingContent = { item.durationMs?.let { Text(formatTime(it.toLong())) } },
-                        ) {
+                        Column(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+                            Text("Queue", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                item.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontWeight = if (isCurrent) FontWeight.Bold else null,
+                                "Drag ≡ to reorder · swipe to remove",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(entries, key = { it.key }) { entry ->
+                        ReorderableItem(reorder, key = entry.key) { isDragging ->
+                            QueueRow(
+                                entry = entry,
+                                isCurrent = entry.index == currentIndex,
+                                dragging = isDragging,
+                                onClick = { onPlayQueueItem(entry.index) },
+                                onRemove = { onRemove(entry.index) },
+                                handle = Modifier.draggableHandle(
+                                    onDragStopped = {
+                                        val to = entriesState.value.indexOf(entry)
+                                        if (to >= 0 && to != entry.index) onMove(entry.index, to)
+                                    },
+                                ),
                             )
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** One song in the queue, as captured when the screen last updated. */
+private data class QueueEntry(val key: String, val index: Int, val track: TrackInfo)
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun QueueRow(
+    entry: QueueEntry,
+    isCurrent: Boolean,
+    dragging: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+    handle: Modifier,
+) {
+    val item = entry.track
+    val swipe = rememberSwipeToDismissBoxState()
+    val elevation by animateDpAsState(if (dragging) 8.dp else 0.dp, label = "drag elevation")
+    SwipeToDismissBox(
+        state = swipe,
+        modifier = Modifier.padding(horizontal = 8.dp),
+        onDismiss = { onRemove() },
+        backgroundContent = {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = if (swipe.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                    Alignment.CenterStart
+                } else {
+                    Alignment.CenterEnd
+                },
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_delete),
+                    contentDescription = "Remove",
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        },
+    ) {
+        Surface(shadowElevation = elevation, shape = RoundedCornerShape(16.dp), color = Color.Transparent) {
+            ListItem(
+                selected = isCurrent,
+                onClick = onClick,
+                supportingContent = item.artist?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+                leadingContent = { Artwork(item.artwork, 44) },
+                trailingContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        item.durationMs?.let { Text(formatTime(it.toLong())) }
+                        IconButton(onClick = {}, modifier = handle) {
+                            Icon(painterResource(R.drawable.ic_drag_handle), contentDescription = "Reorder")
+                        }
+                    }
+                },
+            ) {
+                Text(
+                    item.title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = if (isCurrent) FontWeight.Bold else null,
+                )
+            }
+        }
+    }
+}
+
+/** "Sleep in 12 min" while a sleep timer runs; updates every few seconds. */
+@Composable
+private fun sleepLabel(sleep: SleepTimer?): String? {
+    if (sleep == null) return null
+    val endsAt = sleep.endsAt ?: return "Pausing at the end of this song"
+    val now by produceState(System.currentTimeMillis(), endsAt) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(5_000)
+        }
+    }
+    val minutes = ((endsAt - now + 59_999) / 60_000).coerceAtLeast(1)
+    return "Pausing in $minutes min"
+}
+
+@Composable
+private fun SleepMenu(sleep: SleepTimer?, onSleep: (Int?) -> Unit, onCancel: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                painterResource(R.drawable.ic_bedtime),
+                contentDescription = "Sleep timer",
+                tint = if (sleep != null) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                "Sleep timer",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            listOf(15, 30, 45, 60).forEach { minutes ->
+                DropdownMenuItem(
+                    text = { Text(if (minutes == 60) "1 hour" else "$minutes minutes") },
+                    onClick = {
+                        open = false
+                        onSleep(minutes)
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("End of this song") },
+                onClick = {
+                    open = false
+                    onSleep(null)
+                },
+            )
+            if (sleep != null) {
+                DropdownMenuItem(
+                    text = { Text("Turn off") },
+                    onClick = {
+                        open = false
+                        onCancel()
+                    },
+                )
             }
         }
     }

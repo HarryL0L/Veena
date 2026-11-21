@@ -117,6 +117,38 @@ impl Queue {
         Some(track)
     }
 
+    /// Move the track at `from` to `to` (both into [`Queue::tracks`]). The
+    /// current track stays current. Without shuffle the play order follows
+    /// the new list; with shuffle only the list changes.
+    pub fn move_track(&mut self, from: usize, to: usize) {
+        let len = self.tracks.len();
+        if from >= len || to >= len || from == to {
+            return;
+        }
+        let track = self.tracks.remove(from);
+        self.tracks.insert(to, track);
+        let moved = |e: usize| {
+            if e == from {
+                to
+            } else if from < to && e > from && e <= to {
+                e - 1
+            } else if to < from && e >= to && e < from {
+                e + 1
+            } else {
+                e
+            }
+        };
+        let current = self.current_index().map(moved);
+        if self.shuffle {
+            for entry in &mut self.order {
+                *entry = moved(*entry);
+            }
+        } else {
+            self.order = (0..len).collect();
+            self.pos = current;
+        }
+    }
+
     pub fn clear(&mut self) {
         self.tracks.clear();
         self.order.clear();
@@ -207,6 +239,29 @@ mod tests {
 
     fn title(t: Option<&Track>) -> Option<&str> {
         t.map(|t| t.title.as_str())
+    }
+
+    fn titles(q: &Queue) -> Vec<&str> {
+        q.tracks().iter().map(|t| t.title.as_str()).collect()
+    }
+
+    #[test]
+    fn moving_keeps_the_current_track_and_follows_the_list() {
+        let mut q = queue(&["a", "b", "c", "d"]);
+        q.jump(1); // b
+        q.move_track(3, 0); // d to the front
+        assert_eq!(titles(&q), ["d", "a", "b", "c"]);
+        assert_eq!(title(q.current()), Some("b"));
+        assert_eq!(title(q.next(false)), Some("c"));
+        // c is current; move b after it, then d after c.
+        q.move_track(2, 3);
+        assert_eq!(titles(&q), ["d", "a", "c", "b"]);
+        q.move_track(0, 2);
+        assert_eq!(titles(&q), ["a", "c", "d", "b"]);
+        assert_eq!(title(q.current()), Some("c"));
+        assert_eq!(title(q.next(false)), Some("d"));
+        q.move_track(9, 0); // out of range: ignored
+        assert_eq!(titles(&q), ["a", "c", "d", "b"]);
     }
 
     #[test]

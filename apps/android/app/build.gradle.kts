@@ -65,6 +65,8 @@ dependencies {
     implementation("androidx.media3:media3-session:1.11.1")
     // Material You colour maths, used to colour the player from the artwork.
     implementation("com.materialkolor:material-color-utilities:5.0.1")
+    // Drag to reorder the queue.
+    implementation("sh.calvin.reorderable:reorderable:3.1.0")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")

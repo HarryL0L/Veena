@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -58,6 +61,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -75,13 +79,18 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
     val search by viewModel.search.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val message by viewModel.messages.collectAsStateWithLifecycle()
+    val sleep by viewModel.sleep.collectAsStateWithLifecycle()
     val snackbars = remember { SnackbarHostState() }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(message) {
         message?.let {
-            val result = snackbars.showSnackbar(it, actionLabel = "Details", duration = SnackbarDuration.Long)
+            val result = if (it.error) {
+                snackbars.showSnackbar(it.text, actionLabel = "Details", duration = SnackbarDuration.Long)
+            } else {
+                snackbars.showSnackbar(it.text, duration = SnackbarDuration.Short)
+            }
             if (result == SnackbarResult.ActionPerformed) showLogs = true
             viewModel.messageShown()
         }
@@ -148,6 +157,8 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                             track = track,
                             playing = player.queue.getOrNull(player.current?.toInt() ?: -1)?.id == track.id,
                             onClick = { viewModel.play(index) },
+                            onPlayNext = { viewModel.playNext(track) },
+                            onAddToQueue = { viewModel.addToQueue(track) },
                         )
                     }
                 }
@@ -173,6 +184,11 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
             onShuffle = viewModel::toggleShuffle,
             onRepeat = viewModel::cycleRepeat,
             onPlayQueueItem = viewModel::playQueueItem,
+            onRemove = viewModel::removeFromQueue,
+            onMove = viewModel::moveInQueue,
+            sleep = sleep,
+            onSleep = viewModel::setSleepTimer,
+            onCancelSleep = viewModel::cancelSleepTimer,
         )
     }
 }
@@ -191,28 +207,58 @@ private fun EmptyState(modifier: Modifier = Modifier) {
     }
 }
 
+/** A search result. Tap to play; hold for more. */
 @Composable
-private fun TrackRow(track: TrackInfo, playing: Boolean, onClick: () -> Unit) {
-    ListItem(
-        selected = playing,
-        onClick = onClick,
-        modifier = Modifier.padding(horizontal = 8.dp),
-        supportingContent = {
+private fun TrackRow(
+    track: TrackInfo,
+    playing: Boolean,
+    onClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        ListItem(
+            selected = playing,
+            onClick = onClick,
+            onLongClick = { menu = true },
+            onLongClickLabel = "More options",
+            modifier = Modifier.padding(horizontal = 8.dp),
+            supportingContent = {
+                Text(
+                    listOfNotNull(track.artist, track.source.ifEmpty { null }).joinToString(" · "),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            leadingContent = { Artwork(track.artwork, 52) },
+            trailingContent = { track.durationMs?.let { Text(formatTime(it.toLong())) } },
+        ) {
             Text(
-                listOfNotNull(track.artist, track.source.ifEmpty { null }).joinToString(" · "),
+                track.title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                fontWeight = if (playing) FontWeight.Bold else null,
             )
-        },
-        leadingContent = { Artwork(track.artwork, 52) },
-        trailingContent = { track.durationMs?.let { Text(formatTime(it.toLong())) } },
-    ) {
-        Text(
-            track.title,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            fontWeight = if (playing) FontWeight.Bold else null,
-        )
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, offset = DpOffset(24.dp, 0.dp)) {
+            DropdownMenuItem(
+                text = { Text("Play next") },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_skip_next), contentDescription = null) },
+                onClick = {
+                    menu = false
+                    onPlayNext()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Add to queue") },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_queue_music), contentDescription = null) },
+                onClick = {
+                    menu = false
+                    onAddToQueue()
+                },
+            )
+        }
     }
 }
 

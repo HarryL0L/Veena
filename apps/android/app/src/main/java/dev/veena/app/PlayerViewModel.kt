@@ -18,6 +18,9 @@ import uniffi.veena_ffi.TrackInfo
 import uniffi.veena_ffi.RepeatMode
 import uniffi.veena_ffi.appLog
 
+/** A short message for the snackbar; errors offer a way to the logs. */
+data class UiMessage(val text: String, val error: Boolean = false)
+
 /** The two kinds of search results the app shows separately. */
 enum class Section(val label: String) {
     MUSIC("Music"),
@@ -48,12 +51,12 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
     val player: StateFlow<PlayerState> = hub.state
 
     /** One-off messages for a snackbar. */
-    private val _messages = MutableStateFlow<String?>(null)
-    val messages: StateFlow<String?> = _messages.asStateFlow()
+    private val _messages = MutableStateFlow<UiMessage?>(null)
+    val messages: StateFlow<UiMessage?> = _messages.asStateFlow()
 
     init {
         viewModelScope.launch {
-            hub.errors.collect { _messages.value = friendly(it) }
+            hub.errors.collect { _messages.value = UiMessage(friendly(it), error = true) }
         }
     }
 
@@ -68,7 +71,7 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
             val result = withContext(Dispatchers.IO) { runCatching { hub.veena.search(query) } }
             result.onFailure {
                 runCatching { appLog("[search] ${it.message}") }
-                _messages.value = it.message ?: "Search failed"
+                _messages.value = UiMessage(it.message ?: "Search failed", error = true)
             }
             _search.update { it.copy(searching = false, results = result.getOrDefault(it.results)) }
         }
@@ -81,6 +84,20 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
     }
 
     fun playQueueItem(index: Int) = hub.send { playAt(index.toUInt()) }
+    fun playNext(track: TrackInfo) {
+        hub.send { playNext(track) }
+        _messages.value = UiMessage("Playing \"${track.title}\" next")
+    }
+    fun addToQueue(track: TrackInfo) {
+        hub.send { enqueue(listOf(track)) }
+        _messages.value = UiMessage("Added \"${track.title}\" to the queue")
+    }
+    fun removeFromQueue(index: Int) = hub.send { remove(index.toUInt()) }
+    fun moveInQueue(from: Int, to: Int) = hub.send { moveTrack(from.toUInt(), to.toUInt()) }
+
+    val sleep = hub.sleep
+    fun setSleepTimer(minutes: Int?) = hub.setSleepTimer(minutes)
+    fun cancelSleepTimer() = hub.cancelSleepTimer()
     fun togglePause() = hub.send { togglePause() }
     fun next() = hub.send { next() }
     fun previous() = hub.send { previous() }

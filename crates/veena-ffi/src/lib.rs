@@ -244,6 +244,22 @@ impl Veena {
         self.player.enqueue(tracks.iter().map(from_info).collect());
     }
 
+    /// Play this track right after the current one.
+    pub fn play_next(&self, track: TrackInfo) {
+        self.remember_sources(std::slice::from_ref(&track));
+        self.player.play_next(from_info(&track));
+    }
+
+    /// Remove a queue entry.
+    pub fn remove(&self, index: u32) {
+        self.player.remove(index as usize);
+    }
+
+    /// Move a queue entry; the current track keeps playing.
+    pub fn move_track(&self, from: u32, to: u32) {
+        self.player.move_track(from as usize, to as usize);
+    }
+
     pub fn play_at(&self, index: u32) {
         self.player.play_at(index as usize);
     }

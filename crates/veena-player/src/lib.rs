@@ -52,6 +52,7 @@ enum Message {
     Enqueue(Vec<Track>),
     PlayNext(Track),
     Remove(usize),
+    Move(usize, usize),
     Clear,
     PlayAt(usize),
     TogglePause,
@@ -131,6 +132,11 @@ impl Player {
 
     pub fn remove(&self, index: usize) {
         self.send(Message::Remove(index));
+    }
+
+    /// Move a queue entry; the current track keeps playing.
+    pub fn move_track(&self, from: usize, to: usize) {
+        self.send(Message::Move(from, to));
     }
 
     pub fn clear(&self) {
@@ -252,6 +258,10 @@ impl Actor {
             }
             Message::PlayNext(track) => {
                 self.queue.insert_next(track);
+                self.emit(PlayerEvent::QueueChanged);
+            }
+            Message::Move(from, to) => {
+                self.queue.move_track(from, to);
                 self.emit(PlayerEvent::QueueChanged);
             }
             Message::Remove(index) => {
