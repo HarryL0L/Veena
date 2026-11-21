@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.net.HttpURLConnection
@@ -48,7 +49,7 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
             lock.withLock {
                 try {
                     withTimeout(30_000) {
-                        val current = session?.takeIf { !it.expired } ?: newSession().also { session = it }
+                        val current = session?.takeIf { !it.expired && !it.gone } ?: newSession().also { session = it }
                         val result = current.call("veenaPot.mint(${JSONObject.quote(identifier)})")
                         JSONTokener(result).nextValue() as? String
                     }
@@ -104,6 +105,10 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
         private val ids = AtomicInteger()
         var expiresAt = Long.MAX_VALUE
         val expired get() = SystemClock.elapsedRealtime() >= expiresAt
+        /** The web view's page process stopped; the session can't be used. */
+        @Volatile var gone = false
+            private set
+        private var destroyed = false
 
         /** Run JavaScript that may return a promise; returns the result as JSON. */
         suspend fun call(expression: String): String {
@@ -137,7 +142,27 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
 
         fun close() {
             pending.values.forEach { it.cancel() }
-            webView.post { webView.destroy() }
+            webView.post { destroy() }
+        }
+
+        /** Main thread. */
+        private fun destroy() {
+            if (destroyed) return
+            destroyed = true
+            webView.destroy()
+        }
+
+        /**
+         * The page process crashed or was stopped to free memory. Fail what is
+         * waiting and drop this web view; the next token starts a new one.
+         * Without this, Android would close the whole app.
+         */
+        fun renderGone(crashed: Boolean) {
+            gone = true
+            log("token web view stopped (${if (crashed) "crashed" else "stopped by Android"}); will restart when needed")
+            val error = IllegalStateException("token web view stopped")
+            pending.values.forEach { it.completeExceptionally(error) }
+            destroy()
         }
 
         companion object {
@@ -156,6 +181,13 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
                 webView.webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String?) {
                         view.evaluateJavascript(HELPER) { loaded.complete(Unit) }
+                    }
+
+                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        session.renderGone(detail.didCrash())
+                        loaded.completeExceptionally(IllegalStateException("token web view stopped while loading"))
+                        // Handled: keep the app running.
+                        return true
                     }
                 }
                 webView.loadDataWithBaseURL(

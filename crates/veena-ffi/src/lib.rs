@@ -162,6 +162,8 @@ pub struct Veena {
     /// Liked songs, history and playlists.
     library: Arc<veena_library::Library>,
     lyric_bricks: Mutex<Vec<Arc<veena_plugin::PluginBrick>>>,
+    /// Set once the bricks have loaded for the first time.
+    plugins_ready: (Mutex<bool>, std::sync::Condvar),
     lyrics_cache: Mutex<std::collections::HashMap<(String, String), Option<LyricsInfo>>>,
 }
 
@@ -199,9 +201,22 @@ impl Veena {
             sources: Mutex::default(),
             library,
             lyric_bricks: Mutex::default(),
+            plugins_ready: (Mutex::new(false), std::sync::Condvar::new()),
             lyrics_cache: Mutex::default(),
         });
-        veena.reload_plugins();
+        // Loading bricks runs their code, which takes a moment; do it in the
+        // background so the app opens at once. Searching and playing wait
+        // for it (see `wait_for_plugins`).
+        let loader = veena.clone();
+        std::thread::Builder::new()
+            .name("veena-plugins".into())
+            .spawn(move || {
+                loader.reload_plugins();
+                let (lock, ready) = &loader.plugins_ready;
+                *lock.lock().unwrap() = true;
+                ready.notify_all();
+            })
+            .map_err(VeenaError::new)?;
         veena.record_history();
         Ok(veena)
     }
@@ -254,6 +269,7 @@ impl Veena {
     /// Lyrics for a song from the lyrics bricks, best first; `None` if no
     /// brick found any. Blocks while searching; results are remembered.
     pub fn lyrics(&self, track: TrackInfo) -> Option<LyricsInfo> {
+        self.wait_for_plugins();
         let key = (track.kind.clone(), track.id.clone());
         if let Some(found) = self.lyrics_cache.lock().unwrap().get(&key) {
             return found.clone();
@@ -305,6 +321,7 @@ impl Veena {
 
     /// Search every catalog. Blocks; call off the UI thread.
     pub fn search(&self, query: String) -> Result<Vec<TrackInfo>, VeenaError> {
+        self.wait_for_plugins();
         let results = self.runtime.block_on(async {
             let mut all = Vec::new();
             let mut errors = Vec::new();
@@ -334,6 +351,7 @@ impl Veena {
 
     /// Replace the queue with `tracks` and play from `start`.
     pub fn play(&self, tracks: Vec<TrackInfo>, start: u32) {
+        self.wait_for_plugins();
         self.remember_sources(&tracks);
         self.player.clear();
         self.player.enqueue(tracks.iter().map(from_info).collect());
@@ -544,6 +562,15 @@ impl Veena {
 }
 
 impl Veena {
+    /// Wait (at most 30 s) until the bricks have loaded after start-up.
+    fn wait_for_plugins(&self) {
+        let (lock, ready) = &self.plugins_ready;
+        let loaded = lock.lock().unwrap();
+        let _ = ready
+            .wait_timeout_while(loaded, Duration::from_secs(30), |loaded| !*loaded)
+            .unwrap();
+    }
+
     /// Add each song to the history when it starts.
     fn record_history(self: &Arc<Self>) {
         let mut events = self.player.subscribe();
