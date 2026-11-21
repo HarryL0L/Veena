@@ -276,6 +276,16 @@ private class Seeds {
         val bite = Path().apply { addOval(androidx.compose.ui.geometry.Rect(Offset(0.42f, -0.28f), 0.92f)) }
         op(disc, bite, PathOperation.Difference)
     }
+    /** One cloud as a single shape, so its puffs don't show through each other. */
+    val cloud = Path().apply {
+        fun puff(x: Float, y: Float, r: Float) = Path().apply { addOval(androidx.compose.ui.geometry.Rect(Offset(x, y), r)) }
+        val base = Path().apply {
+            addRoundRect(androidx.compose.ui.geometry.RoundRect(0.1f, 0.02f, 0.9f, 0.26f, androidx.compose.ui.geometry.CornerRadius(0.12f)))
+        }
+        val a = Path().apply { op(base, puff(0.25f, 0.06f, 0.22f), PathOperation.Union) }
+        val b = Path().apply { op(a, puff(0.5f, -0.04f, 0.3f), PathOperation.Union) }
+        op(b, puff(0.76f, 0.08f, 0.2f), PathOperation.Union)
+    }
     val clouds = Array(4) { floatArrayOf(r.nextFloat(), 0.12f + r.nextFloat() * 0.3f, 0.7f + r.nextFloat() * 0.6f, 4f + r.nextFloat() * 6f) }
 }
 
@@ -389,11 +399,10 @@ private fun DrawScope.drawClouds(seeds: Seeds, t: Float, hour: Float, night: Flo
         val span = size.width + w * 2
         val x = ((c[0] * span + t * c[3].dp.toPx()) % span) - w
         val y = size.height * c[1]
-        val color = tint.copy(alpha = alpha)
-        drawCircle(color, w * 0.22f, Offset(x + w * 0.25f, y + w * 0.06f))
-        drawCircle(color, w * 0.3f, Offset(x + w * 0.5f, y - w * 0.04f))
-        drawCircle(color, w * 0.2f, Offset(x + w * 0.76f, y + w * 0.08f))
-        drawRoundRect(color, Offset(x + w * 0.1f, y + w * 0.02f), Size(w * 0.8f, w * 0.24f), androidx.compose.ui.geometry.CornerRadius(w * 0.12f))
+        withTransform({
+            translate(x, y)
+            scale(w, w, Offset.Zero)
+        }) { drawPath(seeds.cloud, tint.copy(alpha = alpha)) }
     }
 }
 
