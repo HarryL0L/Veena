@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Veena
+GenericName=Music Player
+Comment=Play music from YouTube Music and more
+Exec=veena-desktop
+Icon=multimedia-audio-player
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;player;youtube;lyrics;
+StartupWMClass=veena-desktop

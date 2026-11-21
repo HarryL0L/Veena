@@ -77,9 +77,13 @@ new app release.
 - Right-click menus and keyboard shortcuts: Space play/pause, Ctrl+F search,
   ←/→ seek, Ctrl+←/→ previous/next, Ctrl+↑/↓ volume.
 - Same core as Android: bricks, liked songs, offline cache, lyrics.
-- Planned: media keys and desktop integration via MPRIS.
+- Media keys and the desktop's media controls (GNOME, KDE and others) via
+  MPRIS: song, artwork, play/pause, next/previous, seeking, shuffle, repeat
+  and volume.
 
-Run it with `cargo run --release -p veena-desktop`. The UI is made with
+Run it with `cargo run --release -p veena-desktop`. To add it to your app
+menu, copy `apps/desktop/veena-desktop.desktop` to `~/.local/share/applications/`
+and the binary to a folder on your `PATH`. The UI is made with
 [Slint](https://slint.dev) under its royalty-free license.
 
 ---

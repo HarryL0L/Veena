@@ -14,6 +14,7 @@ path = "src/main.rs"
 veena-ffi = { path = "../../crates/veena-ffi" }
 veena-net = { path = "../../crates/veena-net" }
 slint = "1.19.0"
+mpris-server = "0.11.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [build-dependencies]

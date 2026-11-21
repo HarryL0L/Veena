@@ -16,6 +16,8 @@ use veena_ffi::{LyricsInfo, PlayState, PlayerListener, PlayerState, RepeatMode, 
 
 slint::include_modules!();
 
+mod mpris;
+
 /// Bricks shipped with the app; installed on first start like on Android.
 const BUNDLED: &[(&str, &str)] = &[
     ("lrclib.js", include_str!("../../../plugins/lrclib.js")),
@@ -65,6 +67,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Player updates arrive on a core thread; hand them to the window's.
     veena.clone().set_listener(Box::new(Listener));
+    // Media keys and the desktop's media controls.
+    mpris::start(window.as_weak());
 
     if let Some(shot) = options.screenshot.clone() {
         run_screenshot(&window, shot, options);
@@ -82,7 +86,7 @@ thread_local! {
     static PAUSE_ON_START: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-fn with_ui(f: impl FnOnce(&mut Ui)) {
+pub(crate) fn with_ui(f: impl FnOnce(&mut Ui)) {
     UI.with(|cell| {
         if let Some(ui) = cell.borrow().as_ref() {
             f(&mut ui.borrow_mut());
@@ -91,7 +95,7 @@ fn with_ui(f: impl FnOnce(&mut Ui)) {
 }
 
 /// What the window shows, kept on the window's thread.
-struct Ui {
+pub(crate) struct Ui {
     veena: Arc<Veena>,
     window: slint::Weak<AppWindow>,
     results: Vec<TrackInfo>,
@@ -103,7 +107,7 @@ struct Ui {
     lyrics: Option<(String, LyricsInfo)>,
 }
 
-fn key(t: &TrackInfo) -> String {
+pub(crate) fn key(t: &TrackInfo) -> String {
     format!("{}:{}", t.kind, t.id)
 }
 
@@ -234,6 +238,7 @@ impl Ui {
             self.refresh_lists();
         }
         self.show_lyrics();
+        mpris::update(&self.state, current);
     }
 
     fn set_lyrics(&mut self, for_key: String, found: Option<LyricsInfo>) {
@@ -413,7 +418,7 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
 }
 
 /// Run a player command off the window's thread.
-fn background(veena: &Arc<Veena>, f: impl FnOnce(&Veena) + Send + 'static) {
+pub(crate) fn background(veena: &Arc<Veena>, f: impl FnOnce(&Veena) + Send + 'static) {
     let veena = veena.clone();
     std::thread::spawn(move || f(&veena));
 }
