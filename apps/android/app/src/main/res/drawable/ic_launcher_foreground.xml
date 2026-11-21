@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A stylised veena: a round resonator, a long neck and strings. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F2B8B5"
+        android:pathData="M42,66 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 z" />
+    <path
+        android:fillColor="#FFDBD1"
+        android:pathData="M52.5,30 h7 v26 h-7 z" />
+    <path
+        android:fillColor="#FFDBD1"
+        android:pathData="M50,26 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 z" />
+    <path
+        android:strokeColor="#2B2A33"
+        android:strokeWidth="1.2"
+        android:pathData="M54.5,32 V76 M57.5,32 V76" />
+</vector>

@@ -27,21 +27,31 @@ jobs:
       - run: cargo test
 
   android:
-    name: Build (Android arm64)
+    name: Android app (APK)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
-      - name: Build with the Android NDK
-        run: |
-          BIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          export CC_aarch64_linux_android="$BIN/aarch64-linux-android26-clang"
-          export AR_aarch64_linux_android="$BIN/llvm-ar"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
-          cargo build --release --target aarch64-linux-android
+      - name: Install cargo-ndk
+        run: cargo install --locked cargo-ndk
+      - name: Build the Rust core and Kotlin bindings
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: apps/android/build-rust.sh
+      - name: Build the APK
+        working-directory: apps/android
+        run: ./gradlew --no-daemon assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: veena-apk
+          path: apps/android/app/build/outputs/apk/release/app-release.apk
 
   dependencies:
     name: Dependency policy
