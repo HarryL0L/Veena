@@ -186,7 +186,7 @@ fn metadata(track: Option<&TrackInfo>, state: &PlayerState) -> Metadata {
         .collect();
     let mut builder = Metadata::builder()
         .title(t.title.clone())
-        .artist(t.artist.clone().into_iter());
+        .artist(t.artist.clone());
     if let Ok(trackid) = TrackId::try_from(format!("/dev/veena/track/{id}")) {
         builder = builder.trackid(trackid);
     }
