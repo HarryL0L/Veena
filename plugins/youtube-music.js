@@ -7,7 +7,7 @@
 export const meta = {
   id: "youtube-music",
   name: "YouTube Music",
-  version: "0.2.2",
+  version: "0.2.3",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com"],
@@ -173,8 +173,26 @@ function parseRow(row) {
     artist: artists.join(", ") || undefined,
     album,
     durationMs: duration ? toSeconds(duration) * 1000 : undefined,
-    artwork: thumbnails.at(-1)?.url,
+    artwork: largeArtwork(thumbnails.at(-1)?.url, videoId),
   };
+}
+
+/**
+ * The same picture at a size that looks sharp on a phone's full player.
+ * Search gives small ones (about 120 px for song covers).
+ */
+function largeArtwork(url, videoId) {
+  if (!url) return undefined;
+  const size = veena.config.artworkSize ?? 800;
+  // Google's image server takes the size in the address: `=w120-h120-...`.
+  if (/googleusercontent\.com|ggpht\.com/.test(url)) {
+    if (/=w\d+-h\d+/.test(url)) return url.replace(/=w\d+-h\d+/, `=w${size}-h${size}`);
+    if (/=s\d+/.test(url)) return url.replace(/=s\d+/, `=s${size}`);
+    return url;
+  }
+  // Video thumbnails: the 1280x720 version.
+  if (/i\.ytimg\.com\/vi\//.test(url)) return `https://i.ytimg.com/vi/${videoId}/hq720.jpg`;
+  return url;
 }
 
 /** The text of the first message YouTube shows instead of results. */
