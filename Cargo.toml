@@ -6,3 +6,10 @@ members = ["crates/*", "apps/linux", "apps/sign"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
+
+[profile.release]
+# Smaller, faster release builds: drop debug info and optimise across
+# crates. Panics still unwind, because the audio code catches some.
+strip = "debuginfo"
+lto = "fat"
+codegen-units = 1

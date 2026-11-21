@@ -37,7 +37,7 @@ jobs:
           java-version: 17
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android, x86_64-linux-android
+          targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-ndk and ALSA headers
         # The bindings generator runs on the build machine and links its audio library.

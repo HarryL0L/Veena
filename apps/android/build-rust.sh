@@ -8,8 +8,12 @@ cd "$(dirname "$0")"
 APP=app/src/main
 ROOT=../..
 
-# Native library for phones (arm64) and emulators (x86_64).
-(cd "$ROOT" && cargo ndk -t arm64-v8a -t x86_64 -P 26 -o "apps/android/$APP/jniLibs" build --release -p veena-ffi)
+# Native library for phones (arm64) by default. Add emulators with
+# ABIS="arm64-v8a x86_64". Each one adds about 12 MB to the app.
+TARGETS=()
+for abi in ${ABIS:-arm64-v8a}; do TARGETS+=(-t "$abi"); done
+rm -rf "$APP/jniLibs"
+(cd "$ROOT" && cargo ndk "${TARGETS[@]}" -P 26 -o "apps/android/$APP/jniLibs" build --release -p veena-ffi)
 
 # Kotlin bindings, generated from the library.
 (cd "$ROOT" && cargo run -q -p veena-ffi --bin uniffi-bindgen -- generate \
