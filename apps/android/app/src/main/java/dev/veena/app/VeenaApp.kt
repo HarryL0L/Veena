@@ -17,9 +17,10 @@ class VeenaApp : Application() {
     }
 
     /**
-     * Copy the bricks shipped in the APK into the plugin folder. Bricks the
-     * updater manages (listed in state.json) are left alone, so a newer
-     * downloaded version is never replaced by an older bundled one.
+     * Copy the bricks shipped in the APK into the plugin folder, and remove
+     * bricks an earlier version shipped but this one no longer does. Bricks
+     * the updater manages (listed in state.json) are left alone, so a newer
+     * downloaded version is never replaced or removed.
      */
     private fun installBundledPlugins() {
         val dir = File(filesDir, "plugins").apply { mkdirs() }
@@ -32,6 +33,9 @@ class VeenaApp : Application() {
                 File(dir, name).outputStream().use { input.copyTo(it) }
             }
         }
+        dir.listFiles { file -> file.name.endsWith(".js") }.orEmpty()
+            .filter { it.name !in bundled && !managed.contains("\"${it.nameWithoutExtension}\"") }
+            .forEach { it.delete() }
         Log.i("veena", "bundled bricks: ${bundled.joinToString()}")
     }
 }

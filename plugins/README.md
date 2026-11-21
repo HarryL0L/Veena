@@ -169,7 +169,6 @@ veena update --rollback <plugin>    # restore the previous version
 
 | File | Source |
 |---|---|
-| `archive-org.js` | Internet Archive: free and public-domain audio. Search + audio links. |
 | `youtube-music.js` | YouTube Music songs, albums and playlists. Search only; labels tracks `youtube`. |
 | `youtube-audio.js` | Audio links for `youtube` tracks (AAC). Tries several YouTube app types in turn. |
 | `youtube-tv-audio.js` | Audio links for `youtube` tracks. Runs YouTube's player code to unscramble links, following [yt-dlp's ejs](https://github.com/yt-dlp/ejs) method (public domain). Tried first (`priority: 10`). Official music tracks that are cut off without a proof-of-origin token fall back to an ordinary upload of the same song (`--config videoFallback=false` turns this off). |

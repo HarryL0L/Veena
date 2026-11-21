@@ -49,7 +49,7 @@ enum Command {
     /// Search every installed catalog and optionally play the results.
     Find {
         query: String,
-        /// Only search this catalog, e.g. `archive-org`.
+        /// Only search this catalog, e.g. `youtube-music`.
         #[arg(short, long)]
         source: Option<String>,
         /// Show at most this many results per source.
@@ -63,7 +63,7 @@ enum Command {
     },
     /// List a plugin playlist or album, optionally playing it.
     Open {
-        /// Catalog id, e.g. `archive-org`.
+        /// Catalog id, e.g. `youtube-music`.
         source: String,
         /// Playlist or album id.
         id: String,

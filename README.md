@@ -125,7 +125,7 @@ veena search "raga" --in ~/Music        # find tracks
 ```sh
 veena --plugins ./plugins plugins                       # show installed plugins
 veena --plugins ./plugins find "sitar" --play           # search plugins and play
-veena --plugins ./plugins open archive-org <album-id>   # open an album
+veena --plugins ./plugins open youtube-music <album-id> # open an album
 ```
 
 Plugins load from `~/.local/share/veena/plugins` by default. See [Writing a Veena plugin](plugins/README.md).

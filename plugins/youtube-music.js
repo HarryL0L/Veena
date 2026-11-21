@@ -7,10 +7,12 @@
 export const meta = {
   id: "youtube-music",
   name: "YouTube Music",
-  version: "0.2.0",
+  version: "0.2.1",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com"],
+  // Listed before other search results.
+  priority: 5,
 };
 
 const BASE = veena.config.baseUrl ?? "https://music.youtube.com";
