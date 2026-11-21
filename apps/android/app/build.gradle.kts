@@ -48,6 +48,17 @@ android {
         buildConfig = true
     }
 
+    // One APK per processor type: arm64 for phones, x86_64 for emulators.
+    // Each only carries its own native library, so phone downloads stay small.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
     packaging {
         jniLibs.useLegacyPackaging = false
     }
