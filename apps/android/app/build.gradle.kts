@@ -5,7 +5,12 @@ plugins {
 
 android {
     namespace = "dev.veena.app"
-    compileSdk = 37
+    // Current AndroidX libraries need the 37.1+ minor SDK release.
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 2
+        }
+    }
 
     defaultConfig {
         applicationId = "dev.veena.app"
