@@ -2,3 +2,7 @@
 .claude/settings.local.json
 # Signing keys must never be committed
 *.key
+
+# Signing keys never go in the repository.
+*.jks
+*.keystore

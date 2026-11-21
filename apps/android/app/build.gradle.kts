@@ -27,14 +27,25 @@ android {
         buildConfigField("String", "UPDATE_KEY", "\"${setting("veena.updateKey", "VEENA_UPDATE_KEY")}\"")
     }
 
+    // The release key comes from the environment (GitHub secrets in CI).
+    // Without it, release builds fall back to the debug key.
+    val keystore = providers.environmentVariable("VEENA_KEYSTORE").orNull
+    if (keystore != null && file(keystore).exists()) {
+        signingConfigs.create("release") {
+            storeFile = file(keystore)
+            storePassword = providers.environmentVariable("VEENA_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("VEENA_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("VEENA_KEY_PASSWORD").get()
+        }
+    }
+
     buildTypes {
         release {
             // Shrink the Kotlin code and drop unused resources.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Signed with the debug key until a release key is set up.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

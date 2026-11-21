@@ -51,8 +51,23 @@ jobs:
       - name: Build the Rust core and Kotlin bindings
         # Phones (arm64) and emulators (x86_64).
         run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" ABIS="arm64-v8a x86_64" apps/android/build-rust.sh
+      - name: Unpack the signing key
+        # From the repository's secrets; without them the APK uses a debug key.
+        env:
+          KEYSTORE_BASE64: ${{ secrets.VEENA_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/veena-release.jks"
+            echo "VEENA_KEYSTORE=$RUNNER_TEMP/veena-release.jks" >> "$GITHUB_ENV"
+          else
+            echo "No signing key in secrets; using the debug key."
+          fi
       - name: Build the APK
         working-directory: apps/android
+        env:
+          VEENA_KEYSTORE_PASSWORD: ${{ secrets.VEENA_KEYSTORE_PASSWORD }}
+          VEENA_KEY_ALIAS: ${{ secrets.VEENA_KEY_ALIAS }}
+          VEENA_KEY_PASSWORD: ${{ secrets.VEENA_KEY_PASSWORD }}
         run: ./gradlew --no-daemon --warning-mode all assembleRelease
       - name: Name the APKs
         run: |
