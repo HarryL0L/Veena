@@ -19,13 +19,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -49,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import dev.veena.app.PlayerViewModel
+import dev.veena.app.R
 import uniffi.veena_ffi.PlayState
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
@@ -86,7 +81,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                     .padding(horizontal = 16.dp)
                     .padding(top = 48.dp, bottom = 8.dp),
                 placeholder = { Text("Search songs") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
                 singleLine = true,
                 shape = RoundedCornerShape(28.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -126,7 +121,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
 private fun EmptyState(modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(
-            Icons.Rounded.MusicNote,
+            painterResource(R.drawable.ic_music_note),
             contentDescription = null,
             modifier = Modifier.size(56.dp),
             tint = MaterialTheme.colorScheme.primary,
@@ -180,7 +175,7 @@ private fun Artwork(url: String?, sizeDp: Int) {
             Modifier.size(sizeDp.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.MusicNote, contentDescription = null)
+            Icon(painterResource(R.drawable.ic_music_note), contentDescription = null)
         }
     }
 }
@@ -214,14 +209,14 @@ private fun NowPlayingBar(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                IconButton(onClick = onPrevious) { Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous") }
+                IconButton(onClick = onPrevious) { Icon(painterResource(R.drawable.ic_skip_previous), contentDescription = "Previous") }
                 FilledIconButton(onClick = onToggle, modifier = Modifier.size(52.dp)) {
                     Icon(
-                        if (player.state == PlayState.PLAYING) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        painterResource(if (player.state == PlayState.PLAYING) R.drawable.ic_pause else R.drawable.ic_play),
                         contentDescription = if (player.state == PlayState.PLAYING) "Pause" else "Play",
                     )
                 }
-                IconButton(onClick = onNext) { Icon(Icons.Rounded.SkipNext, contentDescription = "Next") }
+                IconButton(onClick = onNext) { Icon(painterResource(R.drawable.ic_skip_next), contentDescription = "Next") }
             }
             Spacer(Modifier.size(10.dp))
             val progress = if (duration != null && duration > 0) {
