@@ -21,7 +21,7 @@
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "1.2.0",
+  version: "1.3.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -58,6 +58,29 @@ const QUEST = {
 };
 
 /**
+ * The Apple Vision Pro app. Its links are plain (no puzzle to solve) and
+ * need no proof-of-origin token, as of yt-dlp 2026.10.26.
+ */
+const VISIONOS = {
+  name: "VISIONOS",
+  id: 101,
+  version: "1.02",
+  userAgent:
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+  extra: { deviceMake: "Apple", deviceModel: "RealityDevice17,1", osName: "visionOS", osVersion: "26.5.23O471" },
+};
+
+/** The TV app as a Samsung TV runs it; needs no token (yt-dlp 2026.10.26). */
+const TV_SAMSUNG = {
+  name: "TVHTML5",
+  id: 7,
+  version: "5.20260707",
+  userAgent:
+    "Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/2.4.0 TV Safari/538.1",
+  extra: { deviceMake: "Samsung", deviceModel: "UKS9800", osName: "Tizen", osVersion: "2.4.0" },
+};
+
+/**
  * The mobile website. Its links need a proof-of-origin token, which only
  * the app can make (Android does it with a hidden web view). Used first
  * when a token is available, because it plays official music tracks.
@@ -74,10 +97,11 @@ const MWEB = {
 /**
  * App types to try, in order; replaceable through `veena.config.tvClients`.
  * TV ("The page needs to be reloaded") and QUEST (cut off after 1 MB) fail
- * as of November 2026, so by default only TV_SIMPLY is used; they are kept
- * for when YouTube changes again.
+ * as of November 2026 and are kept for when YouTube changes again. The
+ * default order follows yt-dlp 2026.10.26: app types that need no token
+ * first, then the mobile website with tokens, then the simplified TV app.
  */
-const CLIENTS = veena.config.tvClients ?? [MWEB, TV_SIMPLY];
+const CLIENTS = veena.config.tvClients ?? [VISIONOS, TV_SAMSUNG, MWEB, TV_SIMPLY];
 /** Links without a proof-of-origin token stop working after this point. */
 const TOKEN_FREE_LIMIT = 1024 * 1024;
 
