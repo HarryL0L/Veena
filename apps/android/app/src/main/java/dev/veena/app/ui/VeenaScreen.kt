@@ -51,6 +51,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +67,7 @@ import dev.veena.app.Section
 import uniffi.veena_ffi.PlayState
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
+import kotlin.math.absoluteValue
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -243,11 +246,35 @@ private fun NowPlayingBar(
 ) {
     val track = player.queue.getOrNull(player.current?.toInt() ?: -1) ?: return
     val duration = player.durationMs?.toLong() ?: track.durationMs?.toLong()
+    val density = LocalDensity.current
+    // Drag up to open the full player; swipe sideways to change songs.
+    val gestures = Modifier.pointerInput(Unit) {
+        var dx = 0f
+        var dy = 0f
+        val threshold = with(density) { 56.dp.toPx() }
+        detectDragGestures(
+            onDragStart = { dx = 0f; dy = 0f },
+            onDrag = { change, amount ->
+                change.consume()
+                dx += amount.x
+                dy += amount.y
+            },
+            onDragEnd = {
+                when {
+                    dy.absoluteValue > dx.absoluteValue && dy < -threshold -> onOpen()
+                    dx.absoluteValue > dy.absoluteValue && dx < -threshold -> onNext()
+                    dx.absoluteValue > dy.absoluteValue && dx > threshold -> onPrevious()
+                }
+            },
+        )
+    }
+    ArtworkTheme(track.artwork) {
     Surface(
         onClick = onOpen,
-        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
+        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp).then(gestures),
         shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         tonalElevation = 3.dp,
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -261,7 +288,6 @@ private fun NowPlayingBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 IconButton(onClick = onPrevious) { Icon(painterResource(R.drawable.ic_skip_previous), contentDescription = "Previous") }
@@ -289,6 +315,7 @@ private fun NowPlayingBar(
             }
         }
     }
+}
 }
 
 internal fun formatTime(ms: Long): String {
