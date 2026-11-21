@@ -46,6 +46,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +75,9 @@ import uniffi.veena_ffi.PlayState
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
 import kotlin.math.absoluteValue
+
+/** Room the floating mini player takes at the bottom of the page. */
+val LocalMiniPlayerSpace = compositionLocalOf { 0.dp }
 
 /** The app's three places. */
 enum class Tab(val label: String, val icon: Int) {
@@ -123,15 +128,6 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
         snackbarHost = { SnackbarHost(snackbars) },
         bottomBar = {
             Column {
-                if (player.current != null) {
-                    NowPlayingBar(
-                        player = player,
-                        onToggle = viewModel::togglePause,
-                        onNext = viewModel::next,
-                        onPrevious = viewModel::previous,
-                        onOpen = { expanded = true },
-                    )
-                }
                 NavigationBar {
                     Tab.entries.forEach { item ->
                         NavigationBarItem(
@@ -148,7 +144,11 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
             }
         },
     ) { padding ->
+        // The mini player floats over the page, so songs scroll behind it;
+        // lists leave this much room at the end so nothing stays hidden.
+        val miniPlayerSpace = if (player.current != null) 104.dp else 0.dp
         Box(Modifier.fillMaxSize().padding(padding)) {
+          CompositionLocalProvider(LocalMiniPlayerSpace provides miniPlayerSpace) {
             val open = collection
             when {
                 open != null -> {
@@ -169,6 +169,17 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                 )
                 tab == Tab.SEARCH -> SearchScreen(viewModel, actions, onLogs = { showLogs = true })
                 else -> LibraryScreen(viewModel, onOpen = { collection = it })
+            }
+          }
+            if (player.current != null) {
+                NowPlayingBar(
+                    player = player,
+                    onToggle = viewModel::togglePause,
+                    onNext = viewModel::next,
+                    onPrevious = viewModel::previous,
+                    onOpen = { expanded = true },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
             }
         }
     }
@@ -272,7 +283,7 @@ private fun SearchScreen(viewModel: PlayerViewModel, actions: TrackActions, onLo
                     modifier = Modifier.align(Alignment.Center),
                     style = MaterialTheme.typography.titleMedium,
                 )
-                else -> LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+                else -> LazyColumn(contentPadding = PaddingValues(bottom = 16.dp + LocalMiniPlayerSpace.current)) {
                     itemsIndexed(search.shown, key = { i, t -> "$i:${t.kind}:${t.id}" }) { index, track ->
                         TrackRow(track, actions, onClick = { viewModel.play(index) })
                     }
@@ -393,6 +404,7 @@ private fun NowPlayingBar(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val track = player.queue.getOrNull(player.current?.toInt() ?: -1) ?: return
     val duration = player.durationMs?.toLong() ?: track.durationMs?.toLong()
@@ -421,7 +433,8 @@ private fun NowPlayingBar(
     ArtworkTheme(track.artwork) {
     Surface(
         onClick = onOpen,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).then(gestures),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).then(gestures),
+        shadowElevation = 6.dp,
         shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,

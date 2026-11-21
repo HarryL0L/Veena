@@ -76,7 +76,7 @@ fun LibraryScreen(viewModel: PlayerViewModel, onOpen: (SongList) -> Unit) {
     val scope = rememberCoroutineScope()
 
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+        LazyColumn(contentPadding = PaddingValues(bottom = 96.dp + LocalMiniPlayerSpace.current)) {
             item {
                 Text(
                     "Library",
@@ -106,7 +106,7 @@ fun LibraryScreen(viewModel: PlayerViewModel, onOpen: (SongList) -> Unit) {
             onClick = { creating = true },
             icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
             text = { Text("New playlist") },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = LocalMiniPlayerSpace.current),
         )
     }
 
@@ -167,7 +167,7 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
     var renaming by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalMiniPlayerSpace.current)) {
         item {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Back") }
