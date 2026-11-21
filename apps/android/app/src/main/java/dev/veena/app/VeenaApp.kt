@@ -23,7 +23,12 @@ class VeenaApp : Application() {
         val minter = PoTokenMinter(this)
         setTokenMinter(minter)
         veena = Veena(filesDir.absolutePath)
-        thread(name = "token-warm-up") { minter.warmUp() }
+        // Set up the token maker after the first screen is showing, so the
+        // web view it needs doesn't slow down opening the app.
+        thread(name = "token-warm-up") {
+            Thread.sleep(5_000)
+            minter.warmUp()
+        }
         hub = PlayerHub(veena)
         library = LibraryHub(veena, hub)
         BrickUpdateWorker.schedule(this)
