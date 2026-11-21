@@ -39,8 +39,11 @@ jobs:
         with:
           targets: aarch64-linux-android, x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-ndk
-        run: cargo install --locked cargo-ndk
+      - name: Install cargo-ndk and ALSA headers
+        # The bindings generator runs on the build machine and links its audio library.
+        run: |
+          sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+          cargo install --locked cargo-ndk
       - name: Build the Rust core and Kotlin bindings
         run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" apps/android/build-rust.sh
       - name: Build the APK
