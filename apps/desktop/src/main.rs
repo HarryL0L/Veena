@@ -16,7 +16,10 @@ use veena_ffi::{LyricsInfo, PlayState, PlayerListener, PlayerState, RepeatMode, 
 
 slint::include_modules!();
 
+mod ambience;
 mod mpris;
+
+use ambience::{AmbienceSettings, Moment};
 
 /// Bricks shipped with the app; installed on first start like on Android.
 const BUNDLED: &[(&str, &str)] = &[
@@ -124,8 +127,21 @@ impl Ui {
             0 => self.shown(self.window.upgrade().is_some_and(|w| w.get_videos())),
             1 => self.recent.clone(),
             2 => self.liked.clone(),
+            4 => self.picks(),
             _ => self.kept.clone(),
         }
+    }
+
+    /// Up to six songs from what was played and liked, for Quick picks.
+    fn picks(&self) -> Vec<TrackInfo> {
+        let mut seen = HashSet::new();
+        self.recent
+            .iter()
+            .chain(self.liked.iter())
+            .filter(|t| seen.insert(key(t)))
+            .take(6)
+            .cloned()
+            .collect()
     }
 
     /// Search results in the chosen section.
@@ -172,6 +188,15 @@ impl Ui {
         ));
         window.set_liked(model(&self.liked));
         window.set_kept(model(&self.kept));
+        // Quick picks: two rows of three, only once there are a few.
+        let picks = self.picks();
+        let (a, b) = if picks.len() >= 3 {
+            picks.split_at(picks.len().min(3))
+        } else {
+            (&[][..], &[][..])
+        };
+        window.set_picks_a(model(a));
+        window.set_picks_b(model(b));
         if let Some(t) = self.current() {
             window.set_now(self.song(t, &liked, &kept));
         }
@@ -330,7 +355,35 @@ impl PlayerListener for Listener {
 // ---------------------------------------------------------------- Actions
 
 fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
-    window.set_greeting("Welcome back".into());
+    // The living background: settings from disk, then refreshed every half
+    // minute so the sky follows the clock.
+    let settings = AmbienceSettings::load();
+    window.set_amb_enabled(settings.enabled);
+    window.set_amb_day(settings.day_part.unwrap_or(-1));
+    window.set_amb_season(settings.season.unwrap_or(-1));
+    window.set_amb_southern(settings.southern);
+    window.set_amb_special(settings.special_days);
+    show_moment(window);
+    let weak = window.as_weak();
+    window.on_ambience_changed(move || {
+        if let Some(w) = weak.upgrade() {
+            ambience_settings(&w).save();
+            show_moment(&w);
+        }
+    });
+    let weak = window.as_weak();
+    let clock = slint::Timer::default();
+    clock.start(
+        slint::TimerMode::Repeated,
+        Duration::from_secs(30),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                show_moment(&w);
+            }
+        },
+    );
+    // The timer lives as long as the app.
+    std::mem::forget(clock);
 
     window.on_search(|query| search(query.to_string()));
     window.on_show_videos(|videos| {
@@ -417,6 +470,38 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
     window.on_set_offline(move |on| v.set_offline(on));
 }
 
+fn ambience_settings(w: &AppWindow) -> AmbienceSettings {
+    let choice = |n: i32| (0..4).contains(&n).then_some(n);
+    AmbienceSettings {
+        enabled: w.get_amb_enabled(),
+        day_part: choice(w.get_amb_day()),
+        season: choice(w.get_amb_season()),
+        southern: w.get_amb_southern(),
+        special_days: w.get_amb_special(),
+    }
+}
+
+/// Greeting, sky and suggestions for right now.
+fn show_moment(w: &AppWindow) {
+    let m = Moment::now(&ambience_settings(w));
+    w.set_scene(m.scene(Color::from_rgb_u8(0x11, 0x13, 0x18)));
+    w.set_greeting(m.greeting().into());
+    w.set_home_line(m.line().into());
+    w.set_date_line(m.date_line().into());
+    w.set_moods_title(format!("For this {}", m.moment_name()).into());
+    let moods: Vec<slint::SharedString> = m.moods().into_iter().map(Into::into).collect();
+    w.set_moods(ModelRc::new(VecModel::from(moods)));
+    let mut label = format!(
+        "{} · {}",
+        ambience::DAY_PARTS[m.day_part()],
+        ambience::SEASONS[m.season as usize]
+    );
+    if m.occasion.is_some() {
+        label = format!("{label} · {}", m.greeting());
+    }
+    w.set_scene_label(label.into());
+}
+
 /// Run a player command off the window's thread.
 pub(crate) fn background(veena: &Arc<Veena>, f: impl FnOnce(&Veena) + Send + 'static) {
     let veena = veena.clone();
@@ -432,6 +517,7 @@ fn search(query: String) {
         if let Some(w) = ui.window.upgrade() {
             w.set_searching(true);
             w.set_search_message("".into());
+            w.set_search_text(query.clone().into());
             w.set_page(1);
         }
         let veena = ui.veena.clone();
@@ -656,7 +742,7 @@ fn friendly(message: &str) -> String {
 
 // ---------------------------------------------------------------- Screenshots
 
-/// `--screenshot FILE [--search QUERY] [--videos] [--play N] [--page N] [--wait SECONDS]`:
+/// `--screenshot FILE [--search QUERY] [--videos] [--play N] [--page N] [--size WxH] [--wait SECONDS]`:
 /// drive the app without a person and save a picture of the window. Used to
 /// show the app from a machine without a screen.
 #[derive(Clone, Default)]
@@ -667,6 +753,8 @@ struct Options {
     page: Option<i32>,
     videos: bool,
     wait: u64,
+    /// Window size for the picture, e.g. 1360x1500.
+    size: Option<(u32, u32)>,
 }
 
 impl Options {
@@ -683,6 +771,12 @@ impl Options {
                 "--play" => options.play = args.next().and_then(|n| n.parse().ok()),
                 "--page" => options.page = args.next().and_then(|n| n.parse().ok()),
                 "--videos" => options.videos = true,
+                "--size" => {
+                    options.size = args.next().and_then(|s| {
+                        let (w, h) = s.split_once('x')?;
+                        Some((w.parse().ok()?, h.parse().ok()?))
+                    })
+                }
                 "--wait" => options.wait = args.next().and_then(|n| n.parse().ok()).unwrap_or(8),
                 _ => {}
             }
@@ -692,6 +786,9 @@ impl Options {
 }
 
 fn run_screenshot(window: &AppWindow, file: PathBuf, options: Options) {
+    if let Some((w, h)) = options.size {
+        window.window().set_size(slint::PhysicalSize::new(w, h));
+    }
     let weak = window.as_weak();
     slint::Timer::single_shot(Duration::from_millis(500), move || {
         if options.videos {

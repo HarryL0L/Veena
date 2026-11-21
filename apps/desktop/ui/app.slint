@@ -4,6 +4,9 @@
 // the right, coloured from the song's artwork.
 
 import { ListView, Switch } from "std-widgets.slint";
+import { AmbientScene, SceneInfo } from "ambience.slint";
+
+export { SceneInfo }
 
 export struct Song {
     title: string,
@@ -173,6 +176,31 @@ component SectionTitle inherits Text {
     font-weight: 700;
 }
 
+/// Three bars bouncing like a level meter, for the song that's on.
+component PlayingBars inherits Rectangle {
+    in property <color> tint: white;
+    property <float> t: animation-tick() / 1ms / 1000;
+    width: 20px;
+    height: 18px;
+    for i in 3: Rectangle {
+        property <float> level: 0.25 + 0.75 * (sin((root.t * (6 + i * 2.3) + i * 1.9) * 1rad) + 1) / 2;
+        x: i * 7px;
+        y: root.height - self.height;
+        width: 5px;
+        height: root.height * self.level;
+        border-radius: 2px;
+        background: root.tint;
+    }
+}
+
+/// A dark veil with dancing bars over the artwork of the song that's on.
+component PlayingOverlay inherits Rectangle {
+    in property <length> corner: 12px;
+    border-radius: corner;
+    background: #00000066;
+    PlayingBars { }
+}
+
 // ---------------------------------------------------------------- Song tables
 
 /// What a song row can ask for (sent with the list and the row number).
@@ -234,7 +262,12 @@ component SongRow inherits Rectangle {
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
-                    if area.has-hover || root.song.playing: IconButton {
+                    if !area.has-hover && root.song.playing: PlayingBars {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        tint: Theme.accent;
+                    }
+                    if area.has-hover: IconButton {
                         icon: @image-url("icons/play.svg");
                         size: 32px;
                         icon-size: 20px;
@@ -311,6 +344,7 @@ component SongCard inherits Rectangle {
             width: 160px;
             height: 160px;
             Artwork { art: root.song.art; width: 160px; height: 160px; corner: 20px; }
+            if root.song.playing: PlayingOverlay { width: 160px; height: 160px; corner: 20px; }
             // A play button rises in on hover, like desktop music apps.
             IconButton {
                 x: parent.width - self.width - 8px;
@@ -337,40 +371,219 @@ component PageTitle inherits Text {
     font-weight: 800;
 }
 
+/// A compact tile: small artwork and the title, three to a row.
+component QuickPick inherits Rectangle {
+    in property <Song> song;
+    callback clicked;
+    height: 64px;
+    horizontal-stretch: 1;
+    min-width: 0;
+    preferred-width: 100px;
+    border-radius: 16px;
+    clip: true;
+    background: song.playing ? Theme.accent-container : area.has-hover ? Theme.surface-highest : Theme.surface-high;
+    animate background { duration: 150ms; }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        padding-right: 12px;
+        Rectangle {
+            width: 64px;
+            Artwork { art: root.song.art; width: 64px; height: 64px; corner: 0; }
+            if root.song.playing: PlayingOverlay { width: 64px; height: 64px; corner: 0; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.song.title; color: Theme.on-surface; font-weight: 600; overflow: elide; }
+            Text { text: root.song.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
+        }
+    }
+}
+
+/// A large card to carry on with the last song.
+component JumpBackIn inherits Rectangle {
+    in property <Song> song;
+    callback clicked;
+    height: 112px;
+    border-radius: Theme.radius;
+    background: @linear-gradient(90deg, Theme.accent-container 0%, Theme.surface-high 100%);
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding: 12px;
+        padding-right: 24px;
+        spacing: 16px;
+        Artwork { art: root.song.art; width: 88px; height: 88px; corner: 18px; }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text { text: "Jump back in"; color: Theme.accent; font-size: 13px; font-weight: 700; }
+            Text { text: root.song.title; color: Theme.on-surface; font-size: 20px; font-weight: 700; overflow: elide; }
+            Text { text: root.song.artist; color: Theme.muted; overflow: elide; }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: @image-url("icons/play.svg");
+            size: 56px;
+            fill: Theme.accent;
+            tint: Theme.background;
+            clicked => { root.clicked(); }
+        }
+    }
+}
+
+/// A genre tile with a slowly turning flower shape in the corner.
+component GenreTile inherits Rectangle {
+    in property <string> label;
+    in property <color> tone;
+    in property <bool> reverse;
+    callback clicked;
+    property <float> t: animation-tick() / 1ms / 1000;
+    height: 96px;
+    horizontal-stretch: 1;
+    border-radius: 24px;
+    clip: true;
+    background: area.has-hover ? root.tone.brighter(0.15) : root.tone;
+    animate background { duration: 150ms; }
+    for i in 2: Rectangle {
+        x: parent.width - 66px;
+        y: 30px;
+        width: 92px;
+        height: 92px;
+        border-radius: 30px;
+        background: #ffffff1c;
+        transform-rotation: (root.reverse ? -1 : 1) * root.t * 15deg + i * 45deg;
+    }
+    Text {
+        x: 18px;
+        y: 16px;
+        text: root.label;
+        color: #f2f0f7;
+        font-size: 18px;
+        font-weight: 800;
+    }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 component HomePage inherits Rectangle {
+    in property <SceneInfo> scene;
+    in property <bool> ambience;
     in property <string> greeting;
+    in property <string> line;
+    in property <string> date-line;
+    in property <string> moods-title;
+    in property <[string]> moods;
     in property <[Song]> recent;
+    in property <[Song]> picks-a;
+    in property <[Song]> picks-b;
     in property <[Song]> liked;
     callback recent-action(int, SongAction);
+    callback pick-action(int, SongAction);
     callback liked-action(int, SongAction);
-    VerticalLayout {
-        padding: 32px;
-        spacing: 16px;
-        PageTitle { text: root.greeting; }
-        if root.recent.length == 0 && root.liked.length == 0: Text {
-            text: "Songs you play and like will show up here. Press Ctrl+F to search.";
-            color: Theme.muted;
-            font-size: 16px;
-        }
-        if root.recent.length > 0: SectionTitle { text: "Recently played"; }
-        if root.recent.length > 0: Flickable {
-            height: 240px;
-            content-width: recent-row.preferred-width;
-            recent-row := HorizontalLayout {
-                spacing: 4px;
-                alignment: start;
-                for song[i] in root.recent: SongCard {
-                    song: song;
-                    clicked => { root.recent-action(i, SongAction.play); }
+    callback search-for(string);
+    Flickable {
+        content-width: self.width;
+        content-height: col.preferred-height;
+        col := VerticalLayout {
+            width: root.width;
+            // The greeting over the living sky.
+            Rectangle {
+                height: 290px;
+                if root.ambience: AmbientScene {
+                    width: 100%;
+                    height: 100%;
+                    info: root.scene;
+                    fade-to: Theme.background;
+                }
+                VerticalLayout {
+                    padding: 32px;
+                    padding-bottom: 4px;
+                    alignment: end;
+                    Text { text: root.date-line; color: Theme.muted; font-size: 14px; font-weight: 600; }
+                    PageTitle { text: root.greeting; font-size: 46px; }
+                    Text { text: root.line; color: Theme.muted; font-size: 17px; }
+                }
+            }
+            VerticalLayout {
+                padding: 32px;
+                padding-top: 20px;
+                spacing: 16px;
+                if root.recent.length > 0 && !root.recent[0].playing: JumpBackIn {
+                    song: root.recent[0];
+                    clicked => { root.recent-action(0, SongAction.play); }
+                }
+                if root.picks-a.length > 0: SectionTitle { text: "Quick picks"; }
+                if root.picks-a.length > 0: HorizontalLayout {
+                    spacing: 10px;
+                    for song[i] in root.picks-a: QuickPick {
+                        song: song;
+                        clicked => { root.pick-action(i, SongAction.play); }
+                    }
+                }
+                if root.picks-b.length > 0: HorizontalLayout {
+                    spacing: 10px;
+                    for song[i] in root.picks-b: QuickPick {
+                        song: song;
+                        clicked => { root.pick-action(i + 3, SongAction.play); }
+                    }
+                }
+                if root.recent.length > 0: SectionTitle { text: "Recently played"; }
+                if root.recent.length > 0: Flickable {
+                    height: 240px;
+                    content-width: recent-row.preferred-width;
+                    recent-row := HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        for song[i] in root.recent: SongCard {
+                            song: song;
+                            clicked => { root.recent-action(i, SongAction.play); }
+                        }
+                    }
+                }
+                SectionTitle { text: root.moods-title; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    for mood in root.moods: Chip {
+                        label: mood;
+                        clicked => { root.search-for(mood); }
+                    }
+                }
+                SectionTitle { text: "Explore"; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    GenreTile { label: "Carnatic"; tone: #3b2f63; clicked => { root.search-for("carnatic veena"); } }
+                    GenreTile { label: "Bollywood"; tone: #5a2d45; reverse: true; clicked => { root.search-for("bollywood hits"); } }
+                    GenreTile { label: "Pop"; tone: #24485a; clicked => { root.search-for("pop hits"); } }
+                    GenreTile { label: "Hip hop"; tone: #4d3d1f; reverse: true; clicked => { root.search-for("hip hop"); } }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    GenreTile { label: "Lo-fi"; tone: #2a4a3a; reverse: true; clicked => { root.search-for("lofi beats"); } }
+                    GenreTile { label: "Rock"; tone: #522a2a; clicked => { root.search-for("rock classics"); } }
+                    GenreTile { label: "Electronic"; tone: #27375e; reverse: true; clicked => { root.search-for("electronic dance"); } }
+                    GenreTile { label: "Classical"; tone: #44402a; clicked => { root.search-for("classical music"); } }
+                }
+                if root.liked.length > 0: SectionTitle { text: "Liked songs"; }
+                if root.liked.length > 0: SongTable {
+                    songs: root.liked;
+                    action(i, a) => { root.liked-action(i, a); }
+                }
+                if root.recent.length == 0 && root.liked.length == 0: Text {
+                    text: "Songs you play and like will show up here. Press Ctrl+F to search.";
+                    color: Theme.muted;
+                    font-size: 15px;
                 }
             }
         }
-        if root.liked.length > 0: SectionTitle { text: "Liked songs"; }
-        if root.liked.length > 0: SongTable {
-            songs: root.liked;
-            action(i, a) => { root.liked-action(i, a); }
-        }
-        if root.liked.length == 0: Rectangle { }
     }
 }
 
@@ -380,11 +593,13 @@ component SearchPage inherits Rectangle {
     in property <bool> videos;
     in property <string> message;
     in property <int> focus-request;
+    in property <string> query;
     callback search(string);
     callback show-videos(bool);
     callback action(int, SongAction);
     changed focus-request => { field.focus(); field.select-all(); }
-    init => { field.focus(); }
+    changed query => { field.text = root.query; }
+    init => { field.text = root.query; field.focus(); }
     VerticalLayout {
         padding: 32px;
         spacing: 16px;
@@ -499,6 +714,7 @@ component SettingRow inherits Rectangle {
         VerticalLayout {
             alignment: center;
             spacing: 2px;
+            horizontal-stretch: 1;
             Text {
                 text: root.title;
                 color: Theme.on-surface;
@@ -518,87 +734,207 @@ component SettingRow inherits Rectangle {
     }
 }
 
+/// One choice out of a few, as chips.
+component ChoiceRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> note;
+    in property <[string]> options;
+    // -1 is the first option ("Auto"), then 0, 1, 2...
+    in-out property <int> selected;
+    callback picked(int);
+    height: 128px;
+    border-radius: 4px;
+    background: Theme.surface-container;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 16px;
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: Theme.accent-container;
+                Icon { source: root.icon; tint: Theme.accent; width: 22px; height: 22px; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Text { text: root.title; color: Theme.on-surface; font-size: 16px; }
+                Text { text: root.note; color: Theme.muted; font-size: 13px; }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            padding-left: 56px;
+            for option[i] in root.options: Chip {
+                label: option;
+                selected: root.selected == i - 1;
+                clicked => {
+                    root.selected = i - 1;
+                    root.picked(i - 1);
+                }
+            }
+        }
+    }
+}
+
 component SettingsPage inherits Rectangle {
     in-out property <bool> keep-songs;
     in-out property <bool> offline;
     in property <string> usage;
+    in-out property <bool> amb-enabled;
+    in-out property <int> amb-day;
+    in-out property <int> amb-season;
+    in-out property <bool> amb-southern;
+    in-out property <bool> amb-special;
+    in property <SceneInfo> scene;
+    in property <string> scene-label;
     callback set-keep-songs(bool);
     callback set-offline(bool);
-    VerticalLayout {
-        padding: 32px;
-        spacing: 2px;
-        Text {
-            text: "Settings";
-            color: Theme.on-surface;
-            font-size: 40px;
-            font-weight: 800;
-        }
-        Text {
-            text: "Offline listening";
-            color: Theme.accent;
-            font-weight: 700;
-            height: 48px;
-            vertical-alignment: center;
-        }
-        SettingRow {
-            first: true;
-            icon: @image-url("icons/offline_pin.svg");
-            title: "Keep songs for offline listening";
-            subtitle: "Songs you play in full stay inside Veena, scrambled. They aren't downloads.";
-            checked <=> root.keep-songs;
-            toggled(on) => { root.set-keep-songs(on); }
-        }
-        SettingRow {
-            icon: @image-url("icons/cloud_off.svg");
-            title: "Offline mode";
-            subtitle: "Only play songs kept on this computer.";
-            checked <=> root.offline;
-            toggled(on) => { root.set-offline(on); }
-        }
-        Rectangle {
-            height: 72px;
-            border-radius: 4px;
-            border-bottom-left-radius: Theme.radius;
-            border-bottom-right-radius: Theme.radius;
-            background: Theme.surface-container;
-            HorizontalLayout {
-                padding: 16px;
-                spacing: 16px;
-                Rectangle {
-                    width: 40px;
-                    height: 40px;
-                    border-radius: 20px;
-                    background: Theme.accent-container;
-                    Icon {
-                        source: @image-url("icons/storage.svg");
-                        tint: Theme.accent;
-                        width: 22px;
-                        height: 22px;
+    callback ambience-changed();
+    Flickable {
+        content-width: self.width;
+        content-height: col.preferred-height;
+        col := VerticalLayout {
+            width: root.width;
+            padding: 32px;
+            spacing: 2px;
+            Text {
+                text: "Settings";
+                color: Theme.on-surface;
+                font-size: 40px;
+                font-weight: 800;
+            }
+            Text {
+                text: "Offline listening";
+                color: Theme.accent;
+                font-weight: 700;
+                height: 48px;
+                vertical-alignment: center;
+            }
+            SettingRow {
+                first: true;
+                icon: @image-url("icons/offline_pin.svg");
+                title: "Keep songs for offline listening";
+                subtitle: "Songs you play in full stay inside Veena, scrambled. They aren't downloads.";
+                checked <=> root.keep-songs;
+                toggled(on) => { root.set-keep-songs(on); }
+            }
+            SettingRow {
+                icon: @image-url("icons/cloud_off.svg");
+                title: "Offline mode";
+                subtitle: "Only play songs kept on this computer.";
+                checked <=> root.offline;
+                toggled(on) => { root.set-offline(on); }
+            }
+            Rectangle {
+                height: 72px;
+                border-radius: 4px;
+                border-bottom-left-radius: Theme.radius;
+                border-bottom-right-radius: Theme.radius;
+                background: Theme.surface-container;
+                HorizontalLayout {
+                    padding: 16px;
+                    spacing: 16px;
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 20px;
+                        background: Theme.accent-container;
+                        Icon {
+                            source: @image-url("icons/storage.svg");
+                            tint: Theme.accent;
+                            width: 22px;
+                            height: 22px;
+                        }
                     }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: "Space for kept songs";
-                        color: Theme.on-surface;
-                        font-size: 16px;
-                    }
-                    Text {
-                        text: root.usage;
-                        color: Theme.muted;
-                        font-size: 13px;
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "Space for kept songs";
+                            color: Theme.on-surface;
+                            font-size: 16px;
+                        }
+                        Text {
+                            text: root.usage;
+                            color: Theme.muted;
+                            font-size: 13px;
+                        }
                     }
                 }
             }
+            Text {
+                text: "Living background";
+                color: Theme.accent;
+                font-weight: 700;
+                height: 48px;
+                vertical-alignment: center;
+            }
+            SettingRow {
+                first: true;
+                last: !root.amb-enabled;
+                icon: @image-url("icons/animation.svg");
+                title: "Living background";
+                subtitle: "An animated sky on Home that follows the clock and the calendar: sun, moon, stars and the seasons.";
+                checked <=> root.amb-enabled;
+                toggled => { root.ambience-changed(); }
+            }
+            if root.amb-enabled: Rectangle {
+                height: 196px;
+                border-radius: 4px;
+                background: Theme.surface-container;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+                    Rectangle {
+                        border-radius: 20px;
+                        clip: true;
+                        AmbientScene { width: 100%; height: 100%; info: root.scene; fade: false; }
+                    }
+                    Text { text: root.scene-label; color: Theme.muted; font-size: 13px; font-weight: 600; }
+                }
+            }
+            if root.amb-enabled: ChoiceRow {
+                icon: @image-url("icons/twilight.svg");
+                title: "Time of day";
+                note: "Auto follows the clock.";
+                options: ["Auto", "Dawn", "Day", "Dusk", "Night"];
+                selected <=> root.amb-day;
+                picked => { root.ambience-changed(); }
+            }
+            if root.amb-enabled: ChoiceRow {
+                icon: @image-url("icons/eco.svg");
+                title: "Season";
+                note: "Auto follows the date.";
+                options: ["Auto", "Spring", "Summer", "Autumn", "Winter"];
+                selected <=> root.amb-season;
+                picked => { root.ambience-changed(); }
+            }
+            if root.amb-enabled && root.amb-season == -1: SettingRow {
+                icon: @image-url("icons/public.svg");
+                title: "Southern hemisphere";
+                subtitle: "Summer in December, winter in June.";
+                checked <=> root.amb-southern;
+                toggled => { root.ambience-changed(); }
+            }
+            if root.amb-enabled: SettingRow {
+                last: true;
+                icon: @image-url("icons/celebration.svg");
+                title: "Special days";
+                subtitle: "Lamps for Diwali, fireworks at New Year, hearts on Valentine's Day.";
+                checked <=> root.amb-special;
+                toggled => { root.ambience-changed(); }
+            }
+            Text {
+                text: "Made with Slint";
+                color: Theme.muted;
+                font-size: 12px;
+                height: 40px;
+                vertical-alignment: bottom;
+            }
         }
-        Text {
-            text: "Made with Slint";
-            color: Theme.muted;
-            font-size: 12px;
-            height: 40px;
-            vertical-alignment: bottom;
-        }
-        Rectangle { }
     }
 }
 
@@ -853,6 +1189,20 @@ export component AppWindow inherits Window {
     in-out property <bool> keep-songs: true;
     in-out property <bool> offline;
     in property <string> usage;
+    in property <SceneInfo> scene;
+    in property <string> scene-label;
+    in property <string> home-line;
+    in property <string> date-line;
+    in property <string> moods-title: "Moods";
+    in property <[string]> moods;
+    in property <[Song]> picks-a;
+    in property <[Song]> picks-b;
+    in property <string> search-text;
+    in-out property <bool> amb-enabled: true;
+    in-out property <int> amb-day: -1;
+    in-out property <int> amb-season: -1;
+    in-out property <bool> amb-southern;
+    in-out property <bool> amb-special: true;
     in-out property <bool> panel-open: true;
     in-out property <int> search-focus;
 
@@ -885,6 +1235,7 @@ export component AppWindow inherits Window {
     callback set-volume(float);
     callback set-keep-songs(bool);
     callback set-offline(bool);
+    callback ambience-changed();
 
     // Keyboard shortcuts. Keys typed into the search field go there first.
     keys := FocusScope {
@@ -948,11 +1299,21 @@ export component AppWindow inherits Window {
                     border-radius: Theme.radius;
                     clip: true;
                     if root.page == 0: HomePage {
+                        scene: root.scene;
+                        ambience: root.amb-enabled;
                         greeting: root.greeting;
+                        line: root.home-line;
+                        date-line: root.date-line;
+                        moods-title: root.moods-title;
+                        moods: root.moods;
                         recent: root.recent;
+                        picks-a: root.picks-a;
+                        picks-b: root.picks-b;
                         liked: root.liked;
                         recent-action(i, a) => { root.song-action(1, i, a); }
+                        pick-action(i, a) => { root.song-action(4, i, a); }
                         liked-action(i, a) => { root.song-action(2, i, a); }
+                        search-for(q) => { root.search(q); }
                     }
                     if root.page == 1: SearchPage {
                         results: root.results;
@@ -960,6 +1321,7 @@ export component AppWindow inherits Window {
                         videos: root.videos;
                         message: root.search-message;
                         focus-request: root.search-focus;
+                        query: root.search-text;
                         search(q) => { root.search(q); }
                         show-videos(v) => { root.show-videos(v); }
                         action(i, a) => { root.song-action(0, i, a); }
@@ -975,8 +1337,16 @@ export component AppWindow inherits Window {
                         keep-songs <=> root.keep-songs;
                         offline <=> root.offline;
                         usage: root.usage;
+                        amb-enabled <=> root.amb-enabled;
+                        amb-day <=> root.amb-day;
+                        amb-season <=> root.amb-season;
+                        amb-southern <=> root.amb-southern;
+                        amb-special <=> root.amb-special;
+                        scene: root.scene;
+                        scene-label: root.scene-label;
                         set-keep-songs(on) => { root.set-keep-songs(on); }
                         set-offline(on) => { root.set-offline(on); }
+                        ambience-changed => { root.ambience-changed(); }
                     }
                 }
 
