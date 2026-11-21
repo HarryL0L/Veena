@@ -7,7 +7,7 @@
 export const meta = {
   id: "lrclib",
   name: "LRCLIB",
-  version: "1.1.0",
+  version: "1.2.0",
   api: 1,
   domains: ["lrclib.net"],
 };
@@ -17,14 +17,29 @@ const BASE = veena.config.baseUrl ?? "https://lrclib.net";
 const LENGTH_TOLERANCE = 4;
 
 export async function lyrics(track) {
-  const { title, artist } = clean(track.title, track.artist);
-  if (!title) return null;
   const seconds = track.durationMs ? Math.round(track.durationMs / 1000) : undefined;
+  // Re-uploads often put "Artist - Title" in the title and their own channel
+  // name in the artist field; try that reading too.
+  for (const guess of guesses(track.title, track.artist)) {
+    const found = await find(guess.title, guess.artist, track.album, seconds);
+    if (found) return found;
+  }
+  return null;
+}
 
+function guesses(rawTitle, rawArtist) {
+  const first = clean(rawTitle, rawArtist);
+  const list = [first];
+  const dash = first.title.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (dash) list.push({ title: dash[2].trim(), artist: dash[1].trim() });
+  return list.filter((g) => g.title);
+}
+
+async function find(title, artist, album, seconds) {
   // An exact lookup first: fast, and right when the names match.
   if (artist) {
     const params = new URLSearchParamsLite({ track_name: title, artist_name: artist });
-    if (track.album) params.set("album_name", track.album);
+    if (album) params.set("album_name", album);
     if (seconds) params.set("duration", String(seconds));
     const res = await veena.http.fetch(`${BASE}/api/get?${params}`);
     if (res.ok) {

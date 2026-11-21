@@ -284,7 +284,7 @@ fn fetch(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsVal
         Ok(response) => JsPromise::resolve(JsValue::from_json(&response, context)?, context),
         Err(message) => JsPromise::reject(JsNativeError::typ().with_message(message), context),
     };
-    Ok(promise.into())
+    Ok(promise?.into())
 }
 
 /// Shared client for plugin requests. Redirects are followed manually so

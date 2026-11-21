@@ -1,0 +1,20 @@
+[package]
+name = "veena-desktop"
+description = "Veena for Linux: the desktop app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "veena-desktop"
+path = "src/main.rs"
+
+[dependencies]
+veena-ffi = { path = "../../crates/veena-ffi" }
+veena-net = { path = "../../crates/veena-net" }
+slint = "1.19.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+
+[build-dependencies]
+slint-build = "1.19.0"

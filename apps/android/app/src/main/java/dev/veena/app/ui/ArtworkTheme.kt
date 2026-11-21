@@ -74,7 +74,12 @@ private suspend fun schemeFor(context: Context, url: String, dark: Boolean): Col
         .size(112)
         .allowHardware(false)
         .build()
-    val bitmap = (context.imageLoader.execute(request) as? SuccessResult)?.image?.toBitmap() ?: return null
+    val bitmap = (context.imageLoader.execute(request) as? SuccessResult)?.image?.toBitmap()
+        ?: url.takeIf { "/hq720.jpg" in it }?.let { fallback ->
+            val retry = ImageRequest.Builder(context).data(fallback.replace("/hq720.jpg", "/hqdefault.jpg")).size(112).allowHardware(false).build()
+            (context.imageLoader.execute(retry) as? SuccessResult)?.image?.toBitmap()
+        }
+        ?: return null
     return withContext(Dispatchers.Default) {
         val seed = seedColor(bitmap) ?: return@withContext null
         SchemeContent(Hct.fromInt(seed), dark, 0.0).toColorScheme()

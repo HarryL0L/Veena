@@ -11,7 +11,7 @@ veena-net = { path = "../veena-net" }
 # `jsvalue-enum`: the default NaN-boxed values assume untagged pointers,
 # which breaks on Android (ARM64 tags heap pointers). Enabled everywhere so
 # every platform runs the same code.
-boa_engine = { version = "0.21.1", features = ["jsvalue-enum"] }
+boa_engine = { version = "0.22.0", features = ["jsvalue-enum"] }
 log = "0.4.35"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

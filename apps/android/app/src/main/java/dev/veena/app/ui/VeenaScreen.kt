@@ -410,12 +410,17 @@ private fun MenuItem(label: String, icon: Int, onClick: () -> Unit) {
 @Composable
 internal fun Artwork(url: String?, sizeDp: Int, modifier: Modifier = Modifier.size(sizeDp.dp)) {
     val shape = RoundedCornerShape((sizeDp / 4).coerceAtMost(28).dp)
-    if (url != null) {
+    // Not every video has the large thumbnail; fall back to the standard one.
+    var source by remember(url) { mutableStateOf(url) }
+    if (source != null) {
         AsyncImage(
-            model = url,
+            model = source,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier.clip(shape),
+            onError = {
+                if (source?.contains("/hq720.jpg") == true) source = source!!.replace("/hq720.jpg", "/hqdefault.jpg")
+            },
         )
     } else {
         Box(

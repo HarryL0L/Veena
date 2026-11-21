@@ -71,8 +71,16 @@ new app release.
 - Synced lyrics, queue reordering, sleep timer.
 
 ### Linux
-- Native desktop app styled to match.
-- Media key and desktop integration via MPRIS.
+- Desktop app in Slint, Material You styled: navigation rail, song tables,
+  a Now Playing panel with live lyrics, and a player bar with volume.
+- Colours from each song's artwork; X11 and Wayland.
+- Right-click menus and keyboard shortcuts: Space play/pause, Ctrl+F search,
+  ←/→ seek, Ctrl+←/→ previous/next, Ctrl+↑/↓ volume.
+- Same core as Android: bricks, liked songs, offline cache, lyrics.
+- Planned: media keys and desktop integration via MPRIS.
+
+Run it with `cargo run --release -p veena-desktop`. The UI is made with
+[Slint](https://slint.dev) under its royalty-free license.
 
 ---
 
@@ -164,12 +172,13 @@ veena/
 │   └── veena-ffi/         Bridge from the core to Kotlin (UniFFI)
 ├── apps/
 │   ├── android/           Android app (Jetpack Compose)
+│   ├── desktop/           Linux desktop app (Slint)
 │   ├── linux/             Terminal player
 │   └── sign/              veena-sign: sign and publish plugin updates
 └── plugins/               Source plugins and the plugin guide
 ```
 
-Planned: a Slint desktop app.
+
 
 ---
 
@@ -183,7 +192,7 @@ Planned: a Slint desktop app.
 - [x] Android app with Material 3 Expressive
 - [x] Background playback, lock screen and headphone controls
 - [x] Official YouTube Music tracks on Android (proof-of-origin tokens)
-- [ ] Linux app
+- [x] Linux desktop app (Slint, X11 and Wayland)
 - [x] Liked songs, recently played and playlists
 - [x] Synced lyrics (LRCLIB brick)
 - [ ] Offline downloads, gapless playback

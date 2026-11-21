@@ -1,0 +1,1013 @@
+// Veena for Linux: Material You on the desktop.
+//
+// Navigation rail on the left, the page in the middle, and the player on
+// the right, coloured from the song's artwork.
+
+import { ListView, Switch } from "std-widgets.slint";
+
+export struct Song {
+    title: string,
+    artist: string,
+    detail: string,
+    duration: string,
+    art: image,
+    playing: bool,
+    liked: bool,
+    kept: bool,
+}
+
+export struct LyricLine {
+    text: string,
+    // -1: already sung, 0: being sung, 1: still to come
+    state: int,
+}
+
+export global Theme {
+    // Taken from the artwork of the song playing.
+    in-out property <color> accent: #a8c7fa;
+    in-out property <color> accent-container: #2b4678;
+    out property <color> background: #111318;
+    out property <color> surface: #191c20;
+    out property <color> surface-container: #1d2024;
+    out property <color> surface-high: #282a2f;
+    out property <color> surface-highest: #33353a;
+    out property <color> on-surface: #e2e2e9;
+    out property <color> muted: #c4c6d0;
+    out property <color> outline: #44474e;
+    out property <length> radius: 28px;
+}
+
+component Icon inherits Image {
+    in property <color> tint: Theme.on-surface;
+    width: 24px;
+    height: 24px;
+    colorize: tint;
+}
+
+component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <length> size: 40px;
+    in property <length> icon-size: 24px;
+    in property <color> tint: Theme.on-surface;
+    in property <color> fill: transparent;
+    in property <length> corner: self.size / 2;
+    callback clicked;
+    width: size;
+    height: size;
+    border-radius: corner;
+    background: area.pressed ? fill.darker(0.2) : area.has-hover ? fill.brighter(0.15) : fill;
+    animate border-radius { duration: 280ms; easing: ease-out-back; }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: area.has-hover && root.fill == transparent ? Theme.on-surface.transparentize(0.9) : transparent;
+    }
+    Icon {
+        source: root.icon;
+        tint: root.tint;
+        width: root.icon-size;
+        height: root.icon-size;
+    }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Artwork inherits Rectangle {
+    in property <image> art;
+    in property <length> corner: 12px;
+    border-radius: corner;
+    clip: true;
+    background: Theme.surface-highest;
+    Icon {
+        visible: art.width == 0;
+        source: @image-url("icons/music_note.svg");
+        tint: Theme.muted;
+        width: min(root.width, root.height) / 3;
+        height: self.width;
+    }
+    Image {
+        source: art;
+        width: parent.width;
+        height: parent.height;
+        image-fit: cover;
+    }
+}
+
+component NavItem inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+    height: 64px;
+    width: 80px;
+    VerticalLayout {
+        alignment: center;
+        spacing: 4px;
+        HorizontalLayout {
+            alignment: center;
+            pill := Rectangle {
+                width: 56px;
+                height: 32px;
+                border-radius: 16px;
+                background: root.selected ? Theme.accent-container : area.has-hover ? Theme.on-surface.transparentize(0.92) : transparent;
+                animate background { duration: 200ms; }
+                Icon {
+                    source: root.icon;
+                    tint: root.selected ? Theme.accent : Theme.muted;
+                }
+            }
+        }
+        Text {
+            text: root.label;
+            horizontal-alignment: center;
+            font-size: 12px;
+            font-weight: root.selected ? 700 : 500;
+            color: root.selected ? Theme.on-surface : Theme.muted;
+        }
+    }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+    height: 36px;
+    min-width: text.preferred-width + 32px;
+    border-radius: 18px;
+    background: selected ? Theme.accent-container : transparent;
+    border-width: selected ? 0 : 1px;
+    border-color: Theme.outline;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 6px;
+        alignment: center;
+        if root.selected: Icon {
+            source: @image-url("icons/check.svg");
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            tint: Theme.accent;
+        }
+        text := Text {
+            text: root.label;
+            vertical-alignment: center;
+            color: Theme.on-surface;
+            font-weight: 600;
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SectionTitle inherits Text {
+    color: Theme.on-surface;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+// ---------------------------------------------------------------- Song tables
+
+/// What a song row can ask for (sent with the list and the row number).
+export enum SongAction { play, like, play-next, queue }
+
+/// Column widths shared by the header and the rows.
+global Columns {
+    out property <length> number: 40px;
+    out property <length> artist: 200px;
+    out property <length> source: 140px;
+    out property <length> like: 40px;
+    out property <length> duration: 56px;
+}
+
+component TableHeader inherits Rectangle {
+    height: 36px;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 12px;
+        Text { text: "#"; width: Columns.number; horizontal-alignment: center; vertical-alignment: center; color: Theme.muted; font-size: 13px; }
+        Text { text: "Title"; horizontal-stretch: 1; vertical-alignment: center; color: Theme.muted; font-size: 13px; }
+        Text { text: "Artist"; width: Columns.artist; vertical-alignment: center; color: Theme.muted; font-size: 13px; }
+        Text { text: "From"; width: Columns.source; vertical-alignment: center; color: Theme.muted; font-size: 13px; }
+        Rectangle { width: Columns.like; }
+        Text { text: "Time"; width: Columns.duration; horizontal-alignment: right; vertical-alignment: center; color: Theme.muted; font-size: 13px; }
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.outline.transparentize(0.5); }
+}
+
+component SongRow inherits Rectangle {
+    in property <Song> song;
+    in property <int> number;
+    callback action(SongAction);
+    height: 56px;
+    border-radius: 12px;
+    background: song.playing ? Theme.accent-container.transparentize(0.4) : area.has-hover ? Theme.surface-high : transparent;
+    ContextMenuArea {
+        Menu {
+            MenuItem { title: "Play"; activated => { root.action(SongAction.play); } }
+            MenuItem { title: "Play next"; activated => { root.action(SongAction.play-next); } }
+            MenuItem { title: "Add to queue"; activated => { root.action(SongAction.queue); } }
+            MenuSeparator { }
+            MenuItem { title: root.song.liked ? "Remove from liked" : "Like"; activated => { root.action(SongAction.like); } }
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            double-clicked => { root.action(SongAction.play); }
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 12px;
+                // The number turns into a play button under the pointer.
+                Rectangle {
+                    width: Columns.number;
+                    if !area.has-hover && !root.song.playing: Text {
+                        text: root.number;
+                        color: Theme.muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    if area.has-hover || root.song.playing: IconButton {
+                        icon: @image-url("icons/play.svg");
+                        size: 32px;
+                        icon-size: 20px;
+                        tint: root.song.playing ? Theme.accent : Theme.on-surface;
+                        clicked => { root.action(SongAction.play); }
+                    }
+                }
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 12px;
+                    Artwork { art: root.song.art; width: 40px; height: 40px; y: (parent.height - self.height) / 2; corner: 8px; }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: root.song.title;
+                            color: root.song.playing ? Theme.accent : Theme.on-surface;
+                            font-weight: root.song.playing ? 700 : 500;
+                            overflow: elide;
+                        }
+                        if root.song.kept: HorizontalLayout {
+                            spacing: 4px;
+                            Icon { source: @image-url("icons/offline_pin.svg"); width: 12px; height: 12px; y: 2px; tint: Theme.accent; }
+                            Text { text: "Kept on this computer"; color: Theme.muted; font-size: 11px; }
+                        }
+                    }
+                }
+                Text { text: root.song.artist; width: Columns.artist; color: Theme.muted; overflow: elide; vertical-alignment: center; }
+                Text { text: root.song.detail; width: Columns.source; color: Theme.muted; overflow: elide; vertical-alignment: center; font-size: 13px; }
+                Rectangle {
+                    width: Columns.like;
+                    if area.has-hover || root.song.liked: IconButton {
+                        icon: root.song.liked ? @image-url("icons/favorite.svg") : @image-url("icons/favorite_border.svg");
+                        tint: root.song.liked ? Theme.accent : Theme.muted;
+                        size: 32px;
+                        icon-size: 18px;
+                        clicked => { root.action(SongAction.like); }
+                    }
+                }
+                Text { text: root.song.duration; width: Columns.duration; color: Theme.muted; horizontal-alignment: right; vertical-alignment: center; font-size: 13px; }
+            }
+        }
+    }
+}
+
+component SongTable inherits VerticalLayout {
+    in property <[Song]> songs;
+    callback action(int, SongAction);
+    TableHeader { }
+    ListView {
+        for song[i] in root.songs: SongRow {
+            song: song;
+            number: i + 1;
+            action(a) => { root.action(i, a); }
+        }
+    }
+}
+
+component SongCard inherits Rectangle {
+    in property <Song> song;
+    callback clicked;
+    width: 180px;
+    height: 236px;
+    border-radius: 20px;
+    background: area.has-hover ? Theme.surface-high : transparent;
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+        Rectangle {
+            width: 160px;
+            height: 160px;
+            Artwork { art: root.song.art; width: 160px; height: 160px; corner: 20px; }
+            // A play button rises in on hover, like desktop music apps.
+            IconButton {
+                x: parent.width - self.width - 8px;
+                y: area.has-hover ? parent.height - self.height - 8px : parent.height - self.height + 4px;
+                opacity: area.has-hover ? 1 : 0;
+                icon: @image-url("icons/play.svg");
+                size: 48px;
+                fill: Theme.accent;
+                tint: Theme.background;
+                animate y, opacity { duration: 180ms; easing: ease-out; }
+                clicked => { root.clicked(); }
+            }
+        }
+        Text { text: root.song.title; color: root.song.playing ? Theme.accent : Theme.on-surface; font-weight: 600; overflow: elide; }
+        Text { text: root.song.artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+    }
+}
+
+// ---------------------------------------------------------------- Pages
+
+component PageTitle inherits Text {
+    color: Theme.on-surface;
+    font-size: 36px;
+    font-weight: 800;
+}
+
+component HomePage inherits Rectangle {
+    in property <string> greeting;
+    in property <[Song]> recent;
+    in property <[Song]> liked;
+    callback recent-action(int, SongAction);
+    callback liked-action(int, SongAction);
+    VerticalLayout {
+        padding: 32px;
+        spacing: 16px;
+        PageTitle { text: root.greeting; }
+        if root.recent.length == 0 && root.liked.length == 0: Text {
+            text: "Songs you play and like will show up here. Press Ctrl+F to search.";
+            color: Theme.muted;
+            font-size: 16px;
+        }
+        if root.recent.length > 0: SectionTitle { text: "Recently played"; }
+        if root.recent.length > 0: Flickable {
+            height: 240px;
+            viewport-width: recent-row.preferred-width;
+            recent-row := HorizontalLayout {
+                spacing: 4px;
+                alignment: start;
+                for song[i] in root.recent: SongCard {
+                    song: song;
+                    clicked => { root.recent-action(i, SongAction.play); }
+                }
+            }
+        }
+        if root.liked.length > 0: SectionTitle { text: "Liked songs"; }
+        if root.liked.length > 0: SongTable {
+            songs: root.liked;
+            action(i, a) => { root.liked-action(i, a); }
+        }
+        if root.liked.length == 0: Rectangle { }
+    }
+}
+
+component SearchPage inherits Rectangle {
+    in property <[Song]> results;
+    in property <bool> searching;
+    in property <bool> videos;
+    in property <string> message;
+    in property <int> focus-request;
+    callback search(string);
+    callback show-videos(bool);
+    callback action(int, SongAction);
+    changed focus-request => { field.focus(); field.select-all(); }
+    init => { field.focus(); }
+    VerticalLayout {
+        padding: 32px;
+        spacing: 16px;
+        HorizontalLayout {
+            spacing: 16px;
+            PageTitle { text: "Search"; }
+            Rectangle {
+                height: 52px;
+                y: (parent.height - self.height) / 2;
+                horizontal-stretch: 1;
+                border-radius: 26px;
+                background: field.has-focus ? Theme.surface-highest : Theme.surface-high;
+                border-width: field.has-focus ? 2px : 0;
+                border-color: Theme.accent;
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    spacing: 12px;
+                    Icon { source: @image-url("icons/search.svg"); tint: Theme.muted; y: (parent.height - self.height) / 2; }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        field := TextInput {
+                            width: 100%;
+                            font-size: 16px;
+                            color: Theme.on-surface;
+                            vertical-alignment: center;
+                            single-line: true;
+                            accepted => { root.search(self.text); }
+                        }
+                        Text {
+                            visible: field.text == "";
+                            x: 0;
+                            text: "Songs, artists, videos";
+                            font-size: 16px;
+                            color: Theme.muted;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Text { text: "Ctrl+F"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Chip { label: "Music"; selected: !root.videos; clicked => { root.show-videos(false); } }
+            Chip { label: "Videos"; selected: root.videos; clicked => { root.show-videos(true); } }
+            Rectangle { width: 12px; }
+            if root.searching: Text { text: "Searching…"; color: Theme.muted; vertical-alignment: center; }
+            if !root.searching && root.message != "": Text { text: root.message; color: Theme.muted; vertical-alignment: center; }
+        }
+        SongTable {
+            songs: root.results;
+            action(i, a) => { root.action(i, a); }
+        }
+    }
+}
+
+component LibraryPage inherits Rectangle {
+    in property <[Song]> liked;
+    in property <[Song]> kept;
+    in property <int> list; // 0 liked, 1 kept
+    callback show(int);
+    callback action(int, SongAction);
+    VerticalLayout {
+        padding: 32px;
+        spacing: 16px;
+        PageTitle { text: "Library"; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Chip { label: "Liked songs · " + root.liked.length; selected: root.list == 0; clicked => { root.show(0); } }
+            Chip { label: "Kept on this computer · " + root.kept.length; selected: root.list == 1; clicked => { root.show(1); } }
+        }
+        SongTable {
+            songs: root.list == 0 ? root.liked : root.kept;
+            action(i, a) => { root.action(i, a); }
+        }
+    }
+}
+
+component SettingRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> subtitle;
+    in-out property <bool> checked;
+    in property <bool> first;
+    in property <bool> last;
+    callback toggled(bool);
+    height: 84px;
+    border-top-left-radius: first ? Theme.radius : 4px;
+    border-top-right-radius: first ? Theme.radius : 4px;
+    border-bottom-left-radius: last ? Theme.radius : 4px;
+    border-bottom-right-radius: last ? Theme.radius : 4px;
+    background: Theme.surface-container;
+    HorizontalLayout {
+        padding: 16px;
+        spacing: 16px;
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 20px;
+            background: Theme.accent-container;
+            Icon {
+                source: root.icon;
+                tint: Theme.accent;
+                width: 22px;
+                height: 22px;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                color: Theme.on-surface;
+                font-size: 16px;
+            }
+            Text {
+                text: root.subtitle;
+                color: Theme.muted;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+        Switch {
+            checked <=> root.checked;
+            toggled => { root.toggled(self.checked); }
+        }
+    }
+}
+
+component SettingsPage inherits Rectangle {
+    in-out property <bool> keep-songs;
+    in-out property <bool> offline;
+    in property <string> usage;
+    callback set-keep-songs(bool);
+    callback set-offline(bool);
+    VerticalLayout {
+        padding: 32px;
+        spacing: 2px;
+        Text {
+            text: "Settings";
+            color: Theme.on-surface;
+            font-size: 40px;
+            font-weight: 800;
+        }
+        Text {
+            text: "Offline listening";
+            color: Theme.accent;
+            font-weight: 700;
+            height: 48px;
+            vertical-alignment: center;
+        }
+        SettingRow {
+            first: true;
+            icon: @image-url("icons/offline_pin.svg");
+            title: "Keep songs for offline listening";
+            subtitle: "Songs you play in full stay inside Veena, scrambled. They aren't downloads.";
+            checked <=> root.keep-songs;
+            toggled(on) => { root.set-keep-songs(on); }
+        }
+        SettingRow {
+            icon: @image-url("icons/cloud_off.svg");
+            title: "Offline mode";
+            subtitle: "Only play songs kept on this computer.";
+            checked <=> root.offline;
+            toggled(on) => { root.set-offline(on); }
+        }
+        Rectangle {
+            height: 72px;
+            border-radius: 4px;
+            border-bottom-left-radius: Theme.radius;
+            border-bottom-right-radius: Theme.radius;
+            background: Theme.surface-container;
+            HorizontalLayout {
+                padding: 16px;
+                spacing: 16px;
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: Theme.accent-container;
+                    Icon {
+                        source: @image-url("icons/storage.svg");
+                        tint: Theme.accent;
+                        width: 22px;
+                        height: 22px;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Space for kept songs";
+                        color: Theme.on-surface;
+                        font-size: 16px;
+                    }
+                    Text {
+                        text: root.usage;
+                        color: Theme.muted;
+                        font-size: 13px;
+                    }
+                }
+            }
+        }
+        Text {
+            text: "Made with Slint";
+            color: Theme.muted;
+            font-size: 12px;
+            height: 40px;
+            vertical-alignment: bottom;
+        }
+        Rectangle { }
+    }
+}
+
+/// A Material 3 style seek bar: a thick filled track, a gap, and a tall
+/// thumb that grows while held.
+component SeekBar inherits Rectangle {
+    in property <float> value;
+    callback released(float);
+    property <float> shown: area.pressed ? clamp(area.mouse-x / self.width, 0, 1) : root.value;
+    height: 32px;
+    // Played part
+    Rectangle {
+        x: 0;
+        width: max(0px, root.width * root.shown - 6px);
+        height: 12px;
+        border-radius: 6px;
+        background: Theme.accent;
+    }
+    // Still to come
+    Rectangle {
+        x: root.width * root.shown + 6px;
+        width: max(0px, root.width - self.x);
+        height: 12px;
+        border-radius: 6px;
+        background: Theme.accent-container;
+    }
+    // Thumb
+    Rectangle {
+        x: root.width * root.shown - self.width / 2;
+        width: 4px;
+        height: area.pressed ? 36px : 28px;
+        border-radius: 2px;
+        background: Theme.accent;
+        animate height { duration: 150ms; }
+    }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.up) {
+                root.released(clamp(self.mouse-x / root.width, 0, 1));
+            }
+        }
+    }
+}
+
+/// The current song large, with its lyrics following along.
+component SidePanel inherits Rectangle {
+    in property <Song> song;
+    in property <bool> has-song;
+    in property <[LyricLine]> lyrics;
+    in property <string> lyrics-note;
+    callback like();
+    width: 360px;
+    border-radius: Theme.radius;
+    clip: true;
+    background: @linear-gradient(180deg, Theme.accent-container 0%, Theme.background 55%, Theme.background 100%);
+    animate background { duration: 500ms; }
+    if !root.has-song: VerticalLayout {
+        alignment: center;
+        padding: 32px;
+        spacing: 8px;
+        Icon { source: @image-url("icons/music_note.svg"); tint: Theme.accent; width: 56px; height: 56px; x: (parent.width - self.width) / 2; }
+        Text { text: "Nothing playing"; color: Theme.on-surface; font-size: 18px; font-weight: 700; horizontal-alignment: center; }
+        Text { text: "Double-click a song, or press Enter in search."; color: Theme.muted; horizontal-alignment: center; wrap: word-wrap; }
+    }
+    if root.has-song: VerticalLayout {
+        padding: 24px;
+        spacing: 14px;
+        Artwork {
+            art: root.song.art;
+            width: 312px;
+            height: 312px;
+            corner: 28px;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            drop-shadow-offset-y: 8px;
+        }
+        HorizontalLayout {
+            VerticalLayout {
+                horizontal-stretch: 1;
+                Text { text: root.song.title; color: Theme.on-surface; font-size: 20px; font-weight: 800; overflow: elide; }
+                Text { text: root.song.artist; color: Theme.muted; overflow: elide; }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: root.song.liked ? @image-url("icons/favorite.svg") : @image-url("icons/favorite_border.svg");
+                tint: root.song.liked ? Theme.accent : Theme.on-surface;
+                clicked => { root.like(); }
+            }
+        }
+        Rectangle {
+            border-radius: 24px;
+            background: Theme.accent-container.transparentize(0.55);
+            VerticalLayout {
+                padding: 20px;
+                spacing: 8px;
+                Text { text: "Lyrics"; color: Theme.on-surface; font-weight: 700; }
+                if root.lyrics.length == 0: Text { text: root.lyrics-note; color: Theme.muted; wrap: word-wrap; }
+                for line in root.lyrics: Text {
+                    text: line.text;
+                    wrap: word-wrap;
+                    font-size: line.state == 0 ? 20px : 15px;
+                    font-weight: line.state == 0 ? 800 : 600;
+                    color: line.state == 0 ? Theme.accent : line.state < 0 ? Theme.on-surface.transparentize(0.4) : Theme.on-surface.transparentize(0.65);
+                    animate font-size, color { duration: 250ms; easing: ease-out; }
+                }
+                Rectangle { }
+            }
+        }
+    }
+}
+
+/// The player bar along the bottom, as on desktop music apps.
+component PlayerBar inherits Rectangle {
+    in property <Song> song;
+    in property <bool> has-song;
+    in property <bool> playing;
+    in property <bool> loading;
+    in property <bool> shuffle;
+    in property <int> repeat;
+    in property <float> progress;
+    in property <string> position;
+    in property <string> duration;
+    in property <float> volume;
+    in property <bool> panel-open;
+    callback toggle();
+    callback next();
+    callback previous();
+    callback seek(float);
+    callback toggle-shuffle();
+    callback cycle-repeat();
+    callback like();
+    callback set-volume(float);
+    callback toggle-panel();
+    height: 92px;
+    border-radius: Theme.radius;
+    background: Theme.surface-container;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 20px;
+        spacing: 16px;
+        // The song
+        HorizontalLayout {
+            width: 300px;
+            spacing: 12px;
+            Artwork { art: root.song.art; width: 64px; height: 64px; y: (parent.height - self.height) / 2; corner: 14px; }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text { text: root.has-song ? root.song.title : "Nothing playing"; color: Theme.on-surface; font-weight: 700; overflow: elide; }
+                Text { text: root.song.artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+            }
+            if root.has-song: IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: root.song.liked ? @image-url("icons/favorite.svg") : @image-url("icons/favorite_border.svg");
+                tint: root.song.liked ? Theme.accent : Theme.muted;
+                size: 36px;
+                icon-size: 20px;
+                clicked => { root.like(); }
+            }
+        }
+        // Controls and seek bar
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            HorizontalLayout {
+                alignment: center;
+                spacing: 12px;
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: @image-url("icons/shuffle.svg");
+                    size: 36px;
+                    icon-size: 20px;
+                    tint: root.shuffle ? Theme.accent : Theme.muted;
+                    clicked => { root.toggle-shuffle(); }
+                }
+                IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/skip_previous.svg"); clicked => { root.previous(); } }
+                // Round while paused, a rounded square while playing.
+                IconButton {
+                    icon: root.playing ? @image-url("icons/pause.svg") : @image-url("icons/play.svg");
+                    size: 48px;
+                    corner: root.playing ? 14px : 24px;
+                    fill: Theme.accent;
+                    tint: Theme.background;
+                    clicked => { root.toggle(); }
+                }
+                IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/skip_next.svg"); clicked => { root.next(); } }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: root.repeat == 2 ? @image-url("icons/repeat_one.svg") : @image-url("icons/repeat.svg");
+                    size: 36px;
+                    icon-size: 20px;
+                    tint: root.repeat > 0 ? Theme.accent : Theme.muted;
+                    clicked => { root.cycle-repeat(); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: root.position; color: Theme.muted; font-size: 12px; width: 44px; horizontal-alignment: right; vertical-alignment: center; }
+                SeekBar { value: root.progress; released(v) => { root.seek(v); } height: 20px; }
+                Text { text: root.loading ? "…" : root.duration; color: Theme.muted; font-size: 12px; width: 44px; vertical-alignment: center; }
+            }
+        }
+        // Lyrics panel and volume
+        HorizontalLayout {
+            width: 240px;
+            spacing: 8px;
+            alignment: end;
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("icons/queue_music.svg");
+                fill: root.panel-open ? Theme.accent-container : transparent;
+                tint: root.panel-open ? Theme.accent : Theme.muted;
+                clicked => { root.toggle-panel(); }
+            }
+            Icon { source: @image-url("icons/music_note.svg"); tint: Theme.muted; width: 20px; height: 20px; y: (parent.height - self.height) / 2; }
+            SeekBar {
+                width: 120px;
+                height: 20px;
+                y: (parent.height - self.height) / 2;
+                value: root.volume;
+                released(v) => { root.set-volume(v); }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Window
+
+export component AppWindow inherits Window {
+    title: "Veena";
+    preferred-width: 1360px;
+    preferred-height: 860px;
+    min-width: 900px;
+    min-height: 600px;
+    // One base colour; the panes float on it.
+    background: Theme.surface;
+    default-font-family: "Inter";
+
+    in-out property <int> page; // 0 home, 1 search, 2 library, 3 settings
+    in property <string> greeting: "Welcome back";
+    in property <[Song]> recent;
+    in property <[Song]> liked;
+    in property <[Song]> kept;
+    in property <[Song]> results;
+    in property <bool> searching;
+    in property <string> search-message;
+    in-out property <bool> videos;
+    in-out property <int> library-list;
+    in-out property <bool> keep-songs: true;
+    in-out property <bool> offline;
+    in property <string> usage;
+    in-out property <bool> panel-open: true;
+    in-out property <int> search-focus;
+
+    in property <Song> now;
+    in property <bool> has-song;
+    in property <bool> playing;
+    in property <bool> loading;
+    in property <bool> shuffle;
+    in property <int> repeat;
+    in property <float> progress;
+    in property <string> position: "0:00";
+    in property <string> duration: "";
+    in-out property <float> volume: 1.0;
+    in property <[LyricLine]> lyrics;
+    in property <string> lyrics-note: "No lyrics found for this song.";
+
+    /// A song row's request. Lists: 0 search results, 1 recently played,
+    /// 2 liked, 3 kept on this computer.
+    callback song-action(int, int, SongAction);
+    callback search(string);
+    callback show-videos(bool);
+    callback toggle();
+    callback next();
+    callback previous();
+    callback seek(float);
+    callback seek-by(int);
+    callback toggle-shuffle();
+    callback cycle-repeat();
+    callback like-now();
+    callback set-volume(float);
+    callback set-keep-songs(bool);
+    callback set-offline(bool);
+
+    // Keyboard shortcuts. Keys typed into the search field go there first.
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " ") {
+                root.toggle();
+                return accept;
+            }
+            if (event.modifiers.control && event.text == "f") {
+                root.page = 1;
+                root.search-focus += 1;
+                return accept;
+            }
+            if (event.modifiers.control && event.text == Key.RightArrow) { root.next(); return accept; }
+            if (event.modifiers.control && event.text == Key.LeftArrow) { root.previous(); return accept; }
+            if (event.modifiers.control && event.text == Key.UpArrow) { root.set-volume(min(1.0, root.volume + 0.1)); return accept; }
+            if (event.modifiers.control && event.text == Key.DownArrow) { root.set-volume(max(0.0, root.volume - 0.1)); return accept; }
+            if (event.text == Key.RightArrow) { root.seek-by(5000); return accept; }
+            if (event.text == Key.LeftArrow) { root.seek-by(-5000); return accept; }
+            reject
+        }
+
+        VerticalLayout {
+            padding: 12px;
+            padding-left: 0;
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 12px;
+                // Navigation rail
+                VerticalLayout {
+                    width: 96px;
+                    padding-top: 12px;
+                    spacing: 12px;
+                    alignment: start;
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 16px;
+                            background: Theme.accent-container;
+                            Icon { source: @image-url("icons/music_note.svg"); tint: Theme.accent; width: 26px; height: 26px; }
+                        }
+                    }
+                    Rectangle { height: 8px; }
+                    HorizontalLayout { alignment: center; NavItem { icon: @image-url("icons/home.svg"); label: "Home"; selected: root.page == 0; clicked => { root.page = 0; } } }
+                    HorizontalLayout { alignment: center; NavItem { icon: @image-url("icons/search.svg"); label: "Search"; selected: root.page == 1; clicked => { root.page = 1; root.search-focus += 1; } } }
+                    HorizontalLayout { alignment: center; NavItem { icon: @image-url("icons/library_music.svg"); label: "Library"; selected: root.page == 2; clicked => { root.page = 2; } } }
+                    HorizontalLayout { alignment: center; NavItem { icon: @image-url("icons/settings.svg"); label: "Settings"; selected: root.page == 3; clicked => { root.page = 3; } } }
+                }
+
+                // Page
+                Rectangle {
+                    background: Theme.background;
+                    border-radius: Theme.radius;
+                    clip: true;
+                    if root.page == 0: HomePage {
+                        greeting: root.greeting;
+                        recent: root.recent;
+                        liked: root.liked;
+                        recent-action(i, a) => { root.song-action(1, i, a); }
+                        liked-action(i, a) => { root.song-action(2, i, a); }
+                    }
+                    if root.page == 1: SearchPage {
+                        results: root.results;
+                        searching: root.searching;
+                        videos: root.videos;
+                        message: root.search-message;
+                        focus-request: root.search-focus;
+                        search(q) => { root.search(q); }
+                        show-videos(v) => { root.show-videos(v); }
+                        action(i, a) => { root.song-action(0, i, a); }
+                    }
+                    if root.page == 2: LibraryPage {
+                        liked: root.liked;
+                        kept: root.kept;
+                        list: root.library-list;
+                        show(l) => { root.library-list = l; }
+                        action(i, a) => { root.song-action(root.library-list == 0 ? 2 : 3, i, a); }
+                    }
+                    if root.page == 3: SettingsPage {
+                        keep-songs <=> root.keep-songs;
+                        offline <=> root.offline;
+                        usage: root.usage;
+                        set-keep-songs(on) => { root.set-keep-songs(on); }
+                        set-offline(on) => { root.set-offline(on); }
+                    }
+                }
+
+                // Hidden on narrow windows so the page keeps its room.
+                if root.panel-open && root.width > 1180px: SidePanel {
+                    song: root.now;
+                    has-song: root.has-song;
+                    lyrics: root.lyrics;
+                    lyrics-note: root.lyrics-note;
+                    like => { root.like-now(); }
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                PlayerBar {
+                    song: root.now;
+                    has-song: root.has-song;
+                    playing: root.playing;
+                    loading: root.loading;
+                    shuffle: root.shuffle;
+                    repeat: root.repeat;
+                    progress: root.progress;
+                    position: root.position;
+                    duration: root.duration;
+                    volume: root.volume;
+                    panel-open: root.panel-open;
+                    toggle => { root.toggle(); }
+                    next => { root.next(); }
+                    previous => { root.previous(); }
+                    seek(v) => { root.seek(v); }
+                    toggle-shuffle => { root.toggle-shuffle(); }
+                    cycle-repeat => { root.cycle-repeat(); }
+                    like => { root.like-now(); }
+                    set-volume(v) => { root.set-volume(v); }
+                    toggle-panel => { root.panel-open = !root.panel-open; }
+                }
+            }
+        }
+    }
+}
