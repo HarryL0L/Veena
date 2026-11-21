@@ -18,6 +18,7 @@ path = "uniffi-bindgen.rs"
 veena-core = { path = "../veena-core" }
 veena-player = { path = "../veena-player" }
 veena-plugin = { path = "../veena-plugin" }
+veena-library = { path = "../veena-library" }
 veena-src-local = { path = "../veena-src-local" }
 veena-updater = { path = "../veena-updater" }
 log = { version = "0.4.35", features = ["std"] }

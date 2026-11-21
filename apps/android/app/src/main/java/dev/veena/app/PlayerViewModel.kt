@@ -44,7 +44,7 @@ data class SearchUiState(
     }
 }
 
-class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
+class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub) : ViewModel() {
     private val _search = MutableStateFlow(SearchUiState())
     val search: StateFlow<SearchUiState> = _search.asStateFlow()
 
@@ -81,6 +81,40 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
     fun play(index: Int) {
         val tracks = _search.value.shown
         hub.send { play(tracks, index.toUInt()) }
+    }
+
+    /** Play a list (an album, playlist, liked songs...) from one of its songs. */
+    fun playList(tracks: List<TrackInfo>, index: Int = 0) {
+        if (tracks.isEmpty()) return
+        hub.send {
+            setShuffle(false)
+            play(tracks, index.coerceIn(0, tracks.lastIndex).toUInt())
+        }
+    }
+
+    /** Play a list in random order. */
+    fun shuffleList(tracks: List<TrackInfo>) {
+        if (tracks.isEmpty()) return
+        hub.send {
+            setShuffle(true)
+            play(tracks, tracks.indices.random().toUInt())
+        }
+    }
+
+    fun toggleLike(track: TrackInfo) = library.toggleLike(track)
+
+    /** Add a song to a playlist, or to a new one when [playlistId] is null. */
+    fun addToPlaylist(track: TrackInfo, playlistId: String?, newName: String = "") {
+        if (playlistId != null) {
+            library.addToPlaylist(playlistId, track)
+            val name = library.playlists.value.firstOrNull { it.id == playlistId }?.name ?: "the playlist"
+            _messages.value = UiMessage("Added to $name")
+        } else {
+            viewModelScope.launch {
+                library.createPlaylist(newName, track)
+                _messages.value = UiMessage("Created \"${newName.ifBlank { "New playlist" }}\"")
+            }
+        }
     }
 
     fun playQueueItem(index: Int) = hub.send { playAt(index.toUInt()) }
@@ -137,7 +171,7 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
         }
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
-            initializer { PlayerViewModel((this[APPLICATION_KEY] as VeenaApp).hub) }
+            initializer { (this[APPLICATION_KEY] as VeenaApp).let { PlayerViewModel(it.hub, it.library) } }
         }
     }
 }

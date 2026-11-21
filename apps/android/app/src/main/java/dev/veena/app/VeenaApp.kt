@@ -13,6 +13,8 @@ class VeenaApp : Application() {
         private set
     lateinit var hub: PlayerHub
         private set
+    lateinit var library: LibraryHub
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -23,6 +25,7 @@ class VeenaApp : Application() {
         veena = Veena(filesDir.absolutePath)
         thread(name = "token-warm-up") { minter.warmUp() }
         hub = PlayerHub(veena)
+        library = LibraryHub(veena, hub)
         BrickUpdateWorker.schedule(this)
     }
 

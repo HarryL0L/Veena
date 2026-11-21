@@ -2931,10 +2931,21 @@ dependencies = [
  "tokio",
  "uniffi",
  "veena-core",
+ "veena-library",
  "veena-player",
  "veena-plugin",
  "veena-src-local",
  "veena-updater",
+]
+
+[[package]]
+name = "veena-library"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "veena-core",
 ]
 
 [[package]]

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +30,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -73,16 +74,26 @@ import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
 import kotlin.math.absoluteValue
 
+/** The app's three places. */
+enum class Tab(val label: String, val icon: Int) {
+    HOME("Home", R.drawable.ic_home),
+    SEARCH("Search", R.drawable.ic_search),
+    LIBRARY("Library", R.drawable.ic_library_music),
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun VeenaScreen(viewModel: PlayerViewModel) {
-    val search by viewModel.search.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
     val message by viewModel.messages.collectAsStateWithLifecycle()
     val sleep by viewModel.sleep.collectAsStateWithLifecycle()
+    val liked by viewModel.library.liked.collectAsStateWithLifecycle()
     val snackbars = remember { SnackbarHostState() }
+    var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
+    var collection by remember { mutableStateOf<SongList?>(null) }
+    var addingToPlaylist by remember { mutableStateOf<TrackInfo?>(null) }
 
     LaunchedEffect(message) {
         message?.let {
@@ -96,77 +107,82 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
         }
     }
 
+    val playingId = player.current?.let { player.queue.getOrNull(it.toInt()) }?.let { "${it.kind}:${it.id}" }
+    // Every song row offers the same actions.
+    val actions = TrackActions(
+        playingId = playingId,
+        isLiked = { t -> liked.any { it.kind == t.kind && it.id == t.id } },
+        onPlayNext = viewModel::playNext,
+        onAddToQueue = viewModel::addToQueue,
+        onToggleLike = viewModel::toggleLike,
+        onAddToPlaylist = { addingToPlaylist = it },
+    )
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbars) },
-        topBar = {
-            Column(Modifier.padding(horizontal = 16.dp).padding(top = 48.dp, bottom = 8.dp)) {
-                OutlinedTextField(
-                    value = search.query,
-                    onValueChange = viewModel::onQueryChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search songs") },
-                    leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
-                    trailingIcon = {
-                        IconButton(onClick = { showLogs = true }) {
-                            Icon(painterResource(R.drawable.ic_bug), contentDescription = "Logs")
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(28.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { viewModel.search() }),
-                )
-                Spacer(Modifier.size(8.dp))
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    Section.entries.forEachIndexed { index, section ->
-                        SegmentedButton(
-                            selected = search.section == section,
-                            onClick = { viewModel.onSectionChange(section) },
-                            shape = SegmentedButtonDefaults.itemShape(index, Section.entries.size),
-                        ) {
-                            Text(section.label)
-                        }
+        bottomBar = {
+            Column {
+                if (player.current != null) {
+                    NowPlayingBar(
+                        player = player,
+                        onToggle = viewModel::togglePause,
+                        onNext = viewModel::next,
+                        onPrevious = viewModel::previous,
+                        onOpen = { expanded = true },
+                    )
+                }
+                NavigationBar {
+                    Tab.entries.forEach { item ->
+                        NavigationBarItem(
+                            selected = tab == item && collection == null,
+                            onClick = {
+                                tab = item
+                                collection = null
+                            },
+                            icon = { Icon(painterResource(item.icon), contentDescription = null) },
+                            label = { Text(item.label) },
+                        )
                     }
                 }
-            }
-        },
-        bottomBar = {
-            if (player.current != null) {
-                NowPlayingBar(
-                    player = player,
-                    onToggle = viewModel::togglePause,
-                    onNext = viewModel::next,
-                    onPrevious = viewModel::previous,
-                    onOpen = { expanded = true },
-                )
             }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
+            val open = collection
             when {
-                search.searching -> LoadingIndicator(Modifier.align(Alignment.Center).size(64.dp))
-                search.results.isEmpty() -> EmptyState(Modifier.align(Alignment.Center))
-                search.shown.isEmpty() -> Text(
-                    "No ${search.section.label.lowercase()} found",
-                    modifier = Modifier.align(Alignment.Center),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                else -> LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                    itemsIndexed(search.shown, key = { i, t -> "$i:${t.kind}:${t.id}" }) { index, track ->
-                        TrackRow(
-                            track = track,
-                            playing = player.queue.getOrNull(player.current?.toInt() ?: -1)?.id == track.id,
-                            onClick = { viewModel.play(index) },
-                            onPlayNext = { viewModel.playNext(track) },
-                            onAddToQueue = { viewModel.addToQueue(track) },
-                        )
-                    }
+                open != null -> {
+                    BackHandler { collection = null }
+                    CollectionScreen(
+                        collection = open,
+                        viewModel = viewModel,
+                        actions = actions,
+                        onBack = { collection = null },
+                    )
                 }
+                tab == Tab.HOME -> HomeScreen(
+                    viewModel = viewModel,
+                    actions = actions,
+                    onOpen = { collection = it },
+                    onSearch = { tab = Tab.SEARCH },
+                    onLogs = { showLogs = true },
+                )
+                tab == Tab.SEARCH -> SearchScreen(viewModel, actions, onLogs = { showLogs = true })
+                else -> LibraryScreen(viewModel, onOpen = { collection = it })
             }
         }
     }
 
     if (showLogs) LogsSheet(onDismiss = { showLogs = false })
+    addingToPlaylist?.let { track ->
+        AddToPlaylistDialog(
+            playlists = viewModel.library.playlists.collectAsStateWithLifecycle().value,
+            onPick = { id, name ->
+                viewModel.addToPlaylist(track, id, name)
+                addingToPlaylist = null
+            },
+            onDismiss = { addingToPlaylist = null },
+        )
+    }
 
     AnimatedVisibility(
         visible = expanded && player.current != null,
@@ -174,6 +190,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
         exit = slideOutVertically { it },
     ) {
         BackHandler { expanded = false }
+        val current = player.current?.let { player.queue.getOrNull(it.toInt()) }
         PlayerScreen(
             player = player,
             onClose = { expanded = false },
@@ -189,7 +206,77 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
             sleep = sleep,
             onSleep = viewModel::setSleepTimer,
             onCancelSleep = viewModel::cancelSleepTimer,
+            liked = current != null && actions.isLiked(current),
+            onToggleLike = { current?.let(viewModel::toggleLike) },
+            onAddToPlaylist = { addingToPlaylist = current },
         )
+    }
+}
+
+/** What a song row can do, shared by every list of songs. */
+class TrackActions(
+    val playingId: String?,
+    val isLiked: (TrackInfo) -> Boolean,
+    val onPlayNext: (TrackInfo) -> Unit,
+    val onAddToQueue: (TrackInfo) -> Unit,
+    val onToggleLike: (TrackInfo) -> Unit,
+    val onAddToPlaylist: (TrackInfo) -> Unit,
+) {
+    fun isPlaying(track: TrackInfo) = playingId == "${track.kind}:${track.id}"
+}
+
+/** Search, with Music and Videos sections. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun SearchScreen(viewModel: PlayerViewModel, actions: TrackActions, onLogs: () -> Unit) {
+    val search by viewModel.search.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 8.dp)) {
+            OutlinedTextField(
+                value = search.query,
+                onValueChange = viewModel::onQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search songs") },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
+                trailingIcon = {
+                    IconButton(onClick = onLogs) {
+                        Icon(painterResource(R.drawable.ic_bug), contentDescription = "Logs")
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { viewModel.search() }),
+            )
+            Spacer(Modifier.size(8.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                Section.entries.forEachIndexed { index, section ->
+                    SegmentedButton(
+                        selected = search.section == section,
+                        onClick = { viewModel.onSectionChange(section) },
+                        shape = SegmentedButtonDefaults.itemShape(index, Section.entries.size),
+                    ) {
+                        Text(section.label)
+                    }
+                }
+            }
+        }
+        Box(Modifier.fillMaxSize()) {
+            when {
+                search.searching -> LoadingIndicator(Modifier.align(Alignment.Center).size(64.dp))
+                search.results.isEmpty() -> EmptyState(Modifier.align(Alignment.Center))
+                search.shown.isEmpty() -> Text(
+                    "No ${search.section.label.lowercase()} found",
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                else -> LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+                    itemsIndexed(search.shown, key = { i, t -> "$i:${t.kind}:${t.id}" }) { index, track ->
+                        TrackRow(track, actions, onClick = { viewModel.play(index) })
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -207,16 +294,20 @@ private fun EmptyState(modifier: Modifier = Modifier) {
     }
 }
 
-/** A search result. Tap to play; hold for more. */
+/**
+ * A song in a list. Tap to play; hold (or tap ⋮) for more. [extra] adds
+ * actions that only make sense in one list, such as removing from a playlist.
+ */
 @Composable
-private fun TrackRow(
+fun TrackRow(
     track: TrackInfo,
-    playing: Boolean,
+    actions: TrackActions,
     onClick: () -> Unit,
-    onPlayNext: () -> Unit,
-    onAddToQueue: () -> Unit,
+    showSource: Boolean = true,
+    extra: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     var menu by remember { mutableStateOf(false) }
+    val playing = actions.isPlaying(track)
     Box {
         ListItem(
             selected = playing,
@@ -226,13 +317,20 @@ private fun TrackRow(
             modifier = Modifier.padding(horizontal = 8.dp),
             supportingContent = {
                 Text(
-                    listOfNotNull(track.artist, track.source.ifEmpty { null }).joinToString(" · "),
+                    listOfNotNull(track.artist, track.source.takeIf { showSource && it.isNotEmpty() }).joinToString(" · "),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             },
             leadingContent = { Artwork(track.artwork, 52) },
-            trailingContent = { track.durationMs?.let { Text(formatTime(it.toLong())) } },
+            trailingContent = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    track.durationMs?.let { Text(formatTime(it.toLong()), style = MaterialTheme.typography.labelMedium) }
+                    IconButton(onClick = { menu = true }) {
+                        Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "More options")
+                    }
+                }
+            },
         ) {
             Text(
                 track.title,
@@ -242,24 +340,28 @@ private fun TrackRow(
             )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, offset = DpOffset(24.dp, 0.dp)) {
-            DropdownMenuItem(
-                text = { Text("Play next") },
-                leadingIcon = { Icon(painterResource(R.drawable.ic_skip_next), contentDescription = null) },
-                onClick = {
-                    menu = false
-                    onPlayNext()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Add to queue") },
-                leadingIcon = { Icon(painterResource(R.drawable.ic_queue_music), contentDescription = null) },
-                onClick = {
-                    menu = false
-                    onAddToQueue()
-                },
-            )
+            val liked = actions.isLiked(track)
+            MenuItem("Play next", R.drawable.ic_skip_next) { menu = false; actions.onPlayNext(track) }
+            MenuItem("Add to queue", R.drawable.ic_queue_music) { menu = false; actions.onAddToQueue(track) }
+            MenuItem(if (liked) "Remove from liked" else "Like", if (liked) R.drawable.ic_favorite else R.drawable.ic_favorite_border) {
+                menu = false
+                actions.onToggleLike(track)
+            }
+            MenuItem("Add to playlist…", R.drawable.ic_playlist_add) { menu = false; actions.onAddToPlaylist(track) }
+            extra.forEach { (label, action) ->
+                MenuItem(label, R.drawable.ic_delete) { menu = false; action() }
+            }
         }
     }
+}
+
+@Composable
+private fun MenuItem(label: String, icon: Int, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = { Icon(painterResource(icon), contentDescription = null) },
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -317,7 +419,7 @@ private fun NowPlayingBar(
     ArtworkTheme(track.artwork) {
     Surface(
         onClick = onOpen,
-        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp).then(gestures),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).then(gestures),
         shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,

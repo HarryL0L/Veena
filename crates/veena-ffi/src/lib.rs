@@ -75,6 +75,16 @@ pub struct PlayerState {
     pub repeat: RepeatMode,
 }
 
+/// A playlist as the library screen lists it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct PlaylistInfo {
+    pub id: String,
+    pub name: String,
+    pub count: u32,
+    /// Artwork of the first song, if any.
+    pub artwork: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct PluginInfo {
     pub id: String,
@@ -123,6 +133,8 @@ pub struct Veena {
     plugins: Mutex<Vec<PluginInfo>>,
     /// Source names by track (kind, id), to label tracks in the queue.
     sources: Mutex<std::collections::HashMap<(String, String), String>>,
+    /// Liked songs, history and playlists.
+    library: Arc<veena_library::Library>,
 }
 
 #[uniffi::export]
@@ -137,6 +149,9 @@ impl Veena {
             .thread_name("veena")
             .build()
             .map_err(VeenaError::new)?;
+        let library = Arc::new(veena_library::Library::open(
+            PathBuf::from(&data_dir).join("library.json"),
+        ));
         let plugins_dir = PathBuf::from(data_dir).join("plugins");
         std::fs::create_dir_all(&plugins_dir).map_err(VeenaError::new)?;
 
@@ -154,8 +169,10 @@ impl Veena {
             plugins_dir,
             plugins: Mutex::default(),
             sources: Mutex::default(),
+            library,
         });
         veena.reload_plugins();
+        veena.record_history();
         Ok(veena)
     }
 
@@ -332,6 +349,81 @@ impl Veena {
         });
     }
 
+    // ------------------------------------------------------------ Library
+
+    /// Liked songs, most recently liked first.
+    pub fn liked(&self) -> Vec<TrackInfo> {
+        self.library.liked().iter().map(entry_info).collect()
+    }
+
+    pub fn is_liked(&self, kind: String, id: String) -> bool {
+        self.library.is_liked(&TrackId::new(kind, id))
+    }
+
+    pub fn set_liked(&self, track: TrackInfo, liked: bool) {
+        self.library.set_liked(info_entry(&track), liked);
+    }
+
+    /// Recently played songs, newest first.
+    pub fn history(&self) -> Vec<TrackInfo> {
+        self.library
+            .history()
+            .iter()
+            .map(|p| entry_info(&p.entry))
+            .collect()
+    }
+
+    pub fn clear_history(&self) {
+        self.library.clear_history();
+    }
+
+    pub fn playlists(&self) -> Vec<PlaylistInfo> {
+        self.library
+            .playlists()
+            .into_iter()
+            .map(|p| PlaylistInfo {
+                artwork: p.tracks.iter().find_map(|e| e.track.artwork.clone()),
+                count: p.tracks.len() as u32,
+                id: p.id,
+                name: p.name,
+            })
+            .collect()
+    }
+
+    /// The songs in a playlist; empty if it doesn't exist.
+    pub fn playlist_tracks(&self, id: String) -> Vec<TrackInfo> {
+        self.library
+            .playlist(&id)
+            .map(|p| p.tracks.iter().map(entry_info).collect())
+            .unwrap_or_default()
+    }
+
+    /// Create a playlist; returns its id.
+    pub fn create_playlist(&self, name: String) -> String {
+        self.library.create_playlist(&name)
+    }
+
+    pub fn rename_playlist(&self, id: String, name: String) {
+        self.library.rename_playlist(&id, &name);
+    }
+
+    pub fn delete_playlist(&self, id: String) {
+        self.library.delete_playlist(&id);
+    }
+
+    pub fn add_to_playlist(&self, id: String, track: TrackInfo) {
+        self.library.add_to_playlist(&id, info_entry(&track));
+    }
+
+    pub fn remove_from_playlist(&self, id: String, index: u32) {
+        self.library.remove_from_playlist(&id, index as usize);
+    }
+
+    pub fn move_in_playlist(&self, id: String, from: u32, to: u32) {
+        self.library
+            .move_in_playlist(&id, from as usize, to as usize);
+    }
+
     /// Install signed brick updates, then reload. Returns a summary.
     pub fn update_plugins(
         &self,
@@ -367,6 +459,36 @@ impl Veena {
 }
 
 impl Veena {
+    /// Add each song to the history when it starts.
+    fn record_history(self: &Arc<Self>) {
+        let mut events = self.player.subscribe();
+        let veena = Arc::downgrade(self);
+        self.runtime.spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(PlayerEvent::TrackChanged { track, .. }) => {
+                        let Some(veena) = veena.upgrade() else { break };
+                        let source = veena
+                            .sources
+                            .lock()
+                            .unwrap()
+                            .get(&(track.id.kind.clone(), track.id.id.clone()))
+                            .cloned()
+                            .unwrap_or_default();
+                        let library = veena.library.clone();
+                        drop(veena);
+                        // File writes stay off the async workers.
+                        tokio::task::spawn_blocking(move || {
+                            library.record_played(veena_library::Entry { track, source })
+                        });
+                    }
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
     fn remember_sources(&self, tracks: &[TrackInfo]) {
         let mut sources = self.sources.lock().unwrap();
         for t in tracks.iter().filter(|t| !t.source.is_empty()) {
@@ -418,6 +540,17 @@ fn to_info(track: &Track, source: String) -> TrackInfo {
         duration_ms: track.duration.map(|d| d.as_millis() as u64),
         artwork: track.artwork.clone(),
         source,
+    }
+}
+
+fn entry_info(entry: &veena_library::Entry) -> TrackInfo {
+    to_info(&entry.track, entry.source.clone())
+}
+
+fn info_entry(info: &TrackInfo) -> veena_library::Entry {
+    veena_library::Entry {
+        track: from_info(info),
+        source: info.source.clone(),
     }
 }
 

@@ -42,6 +42,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -111,6 +112,9 @@ fun PlayerScreen(
     sleep: SleepTimer?,
     onSleep: (minutes: Int?) -> Unit,
     onCancelSleep: () -> Unit,
+    liked: Boolean,
+    onToggleLike: () -> Unit,
+    onAddToPlaylist: () -> Unit,
 ) {
     val currentIndex = player.current?.toInt() ?: return
     val track = player.queue.getOrNull(currentIndex) ?: return
@@ -201,7 +205,8 @@ fun PlayerScreen(
                         contentKey = { "${it.kind}:${it.id}" },
                         label = "title",
                     ) { shown ->
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(start = 32.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
                             Text(
                                 shown.title,
                                 style = MaterialTheme.typography.headlineSmall,
@@ -217,6 +222,17 @@ fun PlayerScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = 4.dp),
                             )
+                        }
+                        IconButton(onClick = onAddToPlaylist) {
+                            Icon(painterResource(R.drawable.ic_playlist_add), contentDescription = "Add to playlist")
+                        }
+                        IconToggleButton(checked = liked, onCheckedChange = { onToggleLike() }) {
+                            Icon(
+                                painterResource(if (liked) R.drawable.ic_favorite else R.drawable.ic_favorite_border),
+                                contentDescription = if (liked) "Remove from liked" else "Like",
+                                tint = if (liked) colors.primary else LocalContentColor.current,
+                            )
+                        }
                         }
                     }
                 }
