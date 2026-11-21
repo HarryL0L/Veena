@@ -1,6 +1,5 @@
 package dev.veena.app.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,7 +20,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -190,24 +188,19 @@ fun PlayerScreen(
                 itemsIndexed(player.queue, key = { i, t -> "q$i:${t.kind}:${t.id}" }) { index, item ->
                     val isCurrent = index == currentIndex
                     ListItem(
-                        modifier = Modifier.clickable { onPlayQueueItem(index) },
-                        headlineContent = {
-                            Text(
-                                item.title,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontWeight = if (isCurrent) FontWeight.Bold else null,
-                            )
-                        },
+                        selected = isCurrent,
+                        onClick = { onPlayQueueItem(index) },
                         supportingContent = item.artist?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
                         leadingContent = { Artwork(item.artwork, 44) },
                         trailingContent = { item.durationMs?.let { Text(formatTime(it.toLong())) } },
-                        colors = if (isCurrent) {
-                            ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                        } else {
-                            ListItemDefaults.colors()
-                        },
-                    )
+                    ) {
+                        Text(
+                            item.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = if (isCurrent) FontWeight.Bold else null,
+                        )
+                    }
                 }
             }
         }

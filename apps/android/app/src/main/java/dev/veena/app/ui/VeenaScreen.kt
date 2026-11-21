@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +28,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -162,15 +160,8 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 @Composable
 private fun TrackRow(track: TrackInfo, playing: Boolean, onClick: () -> Unit) {
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        headlineContent = {
-            Text(
-                track.title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = if (playing) FontWeight.Bold else null,
-            )
-        },
+        selected = playing,
+        onClick = onClick,
         supportingContent = {
             Text(
                 listOfNotNull(track.artist, track.source.ifEmpty { null }).joinToString(" · "),
@@ -180,12 +171,14 @@ private fun TrackRow(track: TrackInfo, playing: Boolean, onClick: () -> Unit) {
         },
         leadingContent = { Artwork(track.artwork, 52) },
         trailingContent = { track.durationMs?.let { Text(formatTime(it.toLong())) } },
-        colors = if (playing) {
-            ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-        } else {
-            ListItemDefaults.colors()
-        },
-    )
+    ) {
+        Text(
+            track.title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontWeight = if (playing) FontWeight.Bold else null,
+        )
+    }
 }
 
 @Composable

@@ -63,7 +63,9 @@ new app release.
 ### Android
 - Material 3 Expressive with dynamic color from your wallpaper on Android 12+.
 - A built-in Veena palette on Android 8–11.
-- Background playback with lock screen and notification controls.
+- Background playback with lock screen, notification and headphone controls.
+- Full player with large artwork, seek bar, shuffle, repeat and queue.
+- Pauses for calls and when headphones are unplugged.
 
 ### Linux
 - Native desktop app styled to match.
@@ -155,14 +157,16 @@ veena/
 │   ├── veena-plugin/      JavaScript plugin engine and sandbox
 │   ├── veena-updater/     Signed plugin updates and rollback
 │   ├── veena-net/         Shared HTTP and TLS setup
-│   └── veena-src-local/   Local music files
+│   ├── veena-src-local/   Local music files
+│   └── veena-ffi/         Bridge from the core to Kotlin (UniFFI)
 ├── apps/
+│   ├── android/           Android app (Jetpack Compose)
 │   ├── linux/             Terminal player
 │   └── sign/              veena-sign: sign and publish plugin updates
 └── plugins/               Source plugins and the plugin guide
 ```
 
-Planned: `apps/android` (Compose via UniFFI) and a Slint desktop app.
+Planned: a Slint desktop app.
 
 ---
 
@@ -171,9 +175,11 @@ Planned: `apps/android` (Compose via UniFFI) and a Slint desktop app.
 - [x] Core playback for local files and streams
 - [x] Plugin engine and sandbox
 - [x] Search and audio-link slots with automatic fallback
-- [ ] YouTube Music plugin
+- [x] YouTube Music search and playback (most tracks)
 - [x] Automatic, signed plugin updates
-- [ ] Android app with Material 3 Expressive
+- [x] Android app with Material 3 Expressive
+- [x] Background playback, lock screen and headphone controls
+- [ ] Official YouTube Music-only tracks
 - [ ] Linux app
 - [ ] Offline downloads, lyrics, gapless playback
 
