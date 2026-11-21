@@ -128,10 +128,13 @@ class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub, priva
         }
     }
 
-    /** Play a result, queueing the rest of its section after it. */
+    /**
+     * Play a result. With autoplay on, similar songs follow it like a radio;
+     * otherwise the rest of its section is queued after it.
+     */
     fun play(index: Int) {
         val tracks = _search.value.shown
-        hub.send { play(tracks, index.toUInt()) }
+        hub.send { playSearchResult(tracks, index.toUInt()) }
     }
 
     /** Play a list (an album, playlist, liked songs...) from one of its songs. */

@@ -363,8 +363,18 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
     window.set_amb_season(settings.season.unwrap_or(-1));
     window.set_amb_southern(settings.southern);
     window.set_amb_special(settings.special_days);
+    window.set_autoplay(settings.autoplay);
+    ui.borrow().veena.set_autoplay(settings.autoplay);
     show_moment(window);
     let weak = window.as_weak();
+    let weak_autoplay = window.as_weak();
+    let veena_autoplay = ui.borrow().veena.clone();
+    window.on_set_autoplay(move |on| {
+        veena_autoplay.set_autoplay(on);
+        if let Some(w) = weak_autoplay.upgrade() {
+            ambience_settings(&w).save();
+        }
+    });
     window.on_ambience_changed(move || {
         if let Some(w) = weak.upgrade() {
             ambience_settings(&w).save();
@@ -398,6 +408,10 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
         with_ui(|ui| {
             let tracks = ui.list(list);
             match action {
+                // A search result starts a radio of similar songs.
+                SongAction::Play if list == 0 => background(&ui.veena, move |v| {
+                    v.play_search_result(tracks, index.max(0) as u32)
+                }),
                 SongAction::Play => play(ui, tracks, index),
                 SongAction::Like => toggle_like(ui, tracks.get(index as usize).cloned()),
                 SongAction::PlayNext => {
@@ -478,6 +492,7 @@ fn ambience_settings(w: &AppWindow) -> AmbienceSettings {
         season: choice(w.get_amb_season()),
         southern: w.get_amb_southern(),
         special_days: w.get_amb_special(),
+        autoplay: w.get_autoplay(),
     }
 }
 

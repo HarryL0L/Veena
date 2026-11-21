@@ -6,6 +6,7 @@
 //! UI thread.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,7 +14,12 @@ use veena_core::{Repeat, SourceRegistry, Track, TrackId, UrlSource};
 use veena_player::{PlaybackState, Player, PlayerEvent, Snapshot};
 use veena_plugin::Options;
 
+mod radio;
+
 uniffi::setup_scaffolding!();
+
+/// Pressing "next" this early in a song counts as skipping it.
+const SKIP_WINDOW: Duration = Duration::from_secs(30);
 
 /// Errors arrive in Kotlin as `VeenaException` with this text as `message`.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -167,6 +173,12 @@ pub struct Veena {
     /// Set once the bricks have loaded for the first time.
     plugins_ready: (Mutex<bool>, std::sync::Condvar),
     lyrics_cache: Mutex<std::collections::HashMap<(String, String), Option<LyricsInfo>>>,
+    /// Add recommended songs when the queue is about to run out.
+    autoplay: AtomicBool,
+    /// The song recommendations were last fetched for, so each song asks once.
+    radio_seed: Mutex<Option<TrackId>>,
+    /// The song playing and how far in it is, to notice early skips.
+    playing: Mutex<(Option<Track>, Duration)>,
 }
 
 #[uniffi::export]
@@ -211,6 +223,9 @@ impl Veena {
             lyric_bricks: Mutex::default(),
             plugins_ready: (Mutex::new(false), std::sync::Condvar::new()),
             lyrics_cache: Mutex::default(),
+            autoplay: AtomicBool::new(true),
+            radio_seed: Mutex::default(),
+            playing: Mutex::default(),
         });
         // Loading bricks runs their code, which takes a moment; do it in the
         // background so the app opens at once. Searching and playing wait
@@ -361,9 +376,31 @@ impl Veena {
     pub fn play(&self, tracks: Vec<TrackInfo>, start: u32) {
         self.wait_for_plugins();
         self.remember_sources(&tracks);
+        *self.radio_seed.lock().unwrap() = None;
         self.player.clear();
         self.player.enqueue(tracks.iter().map(from_info).collect());
         self.player.play_at(start as usize);
+    }
+
+    /// Play a search result. With autoplay on, the song plays on its own and
+    /// recommendations follow it, like a radio; otherwise the other results
+    /// are queued after it.
+    pub fn play_search_result(&self, results: Vec<TrackInfo>, index: u32) {
+        let index = index as usize;
+        if self.autoplay.load(Ordering::Relaxed) && index < results.len() {
+            self.play(vec![results[index].clone()], 0);
+        } else {
+            self.play(results, index as u32);
+        }
+    }
+
+    /// Recommend and add similar songs when the queue is about to run out.
+    pub fn set_autoplay(&self, enabled: bool) {
+        self.autoplay.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn autoplay(&self) -> bool {
+        self.autoplay.load(Ordering::Relaxed)
     }
 
     /// Add tracks to the end of the queue.
@@ -405,6 +442,13 @@ impl Veena {
     }
 
     pub fn next(&self) {
+        // Leaving a song in its first seconds says something about it.
+        let (track, position) = self.playing.lock().unwrap().clone();
+        if let Some(track) = track.filter(|_| position < SKIP_WINDOW) {
+            let library = self.library.clone();
+            self.runtime
+                .spawn_blocking(move || library.record_skip(&track));
+        }
         self.player.next();
     }
 
@@ -635,8 +679,14 @@ impl Veena {
         self.runtime.spawn(async move {
             loop {
                 match events.recv().await {
-                    Ok(PlayerEvent::TrackChanged { track, .. }) => {
+                    Ok(PlayerEvent::Position { position, .. }) => {
                         let Some(veena) = veena.upgrade() else { break };
+                        veena.playing.lock().unwrap().1 = position;
+                    }
+                    Ok(PlayerEvent::TrackChanged { track, index }) => {
+                        let Some(veena) = veena.upgrade() else { break };
+                        *veena.playing.lock().unwrap() = (Some(track.clone()), Duration::ZERO);
+                        veena.top_up_queue(index, track.clone());
                         let source = veena
                             .sources
                             .lock()
@@ -655,6 +705,71 @@ impl Veena {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
+        });
+    }
+
+    /// When the song at `index` is the last or next to last in the queue,
+    /// fetch recommendations for it and add the best ones.
+    fn top_up_queue(self: &Arc<Self>, index: usize, seed: Track) {
+        if !self.autoplay.load(Ordering::Relaxed) || self.cache.offline() {
+            return;
+        }
+        {
+            let mut last = self.radio_seed.lock().unwrap();
+            if last.as_ref() == Some(&seed.id) {
+                return;
+            }
+            *last = Some(seed.id.clone());
+        }
+        let veena = Arc::downgrade(self);
+        self.runtime.spawn(async move {
+            let Some(this) = veena.upgrade() else { return };
+            let snapshot = this.player.snapshot().await;
+            if snapshot.repeat != Repeat::Off || index + 2 < snapshot.tracks.len() {
+                return;
+            }
+            let catalogs = this.registry.catalogs();
+            drop(this);
+            let mut found = None;
+            for catalog in catalogs {
+                match catalog.related(&seed).await {
+                    Ok(tracks) if !tracks.is_empty() => {
+                        found = Some((catalog.name().to_owned(), tracks));
+                        break;
+                    }
+                    Ok(_) | Err(veena_core::Error::Unsupported { .. }) => {}
+                    Err(e) => log::warn!("recommendations from {}: {e}", catalog.name()),
+                }
+            }
+            let (Some(this), Some((source, candidates))) = (veena.upgrade(), found) else {
+                return;
+            };
+            let history = this.library.history();
+            let liked = this.library.liked();
+            let skips = this.library.skips();
+            let taste = radio::Taste {
+                history: &history,
+                liked: &liked,
+                skips: &skips,
+            };
+            // The queue may have changed while waiting.
+            let queue = this.player.snapshot().await.tracks;
+            let picks = radio::pick(candidates, &seed, &queue, &taste);
+            if picks.is_empty() {
+                return;
+            }
+            {
+                let mut sources = this.sources.lock().unwrap();
+                for t in &picks {
+                    sources.insert((t.id.kind.clone(), t.id.id.clone()), source.clone());
+                }
+            }
+            log::info!(
+                "added {} recommended songs after {}",
+                picks.len(),
+                seed.title
+            );
+            this.player.enqueue(picks);
         });
     }
 

@@ -794,6 +794,8 @@ component SettingsPage inherits Rectangle {
     callback set-keep-songs(bool);
     callback set-offline(bool);
     callback ambience-changed();
+    in-out property <bool> autoplay;
+    callback set-autoplay(bool);
     Flickable {
         content-width: self.width;
         content-height: col.preferred-height;
@@ -864,6 +866,22 @@ component SettingsPage inherits Rectangle {
                         }
                     }
                 }
+            }
+            Text {
+                text: "Playback";
+                color: Theme.accent;
+                font-weight: 700;
+                height: 48px;
+                vertical-alignment: center;
+            }
+            SettingRow {
+                first: true;
+                last: true;
+                icon: @image-url("icons/queue_music.svg");
+                title: "Autoplay similar songs";
+                subtitle: "When the queue runs out, keep going with songs like the last one, picked using what you like and skip.";
+                checked <=> root.autoplay;
+                toggled(on) => { root.set-autoplay(on); }
             }
             Text {
                 text: "Living background";
@@ -1203,6 +1221,7 @@ export component AppWindow inherits Window {
     in-out property <int> amb-season: -1;
     in-out property <bool> amb-southern;
     in-out property <bool> amb-special: true;
+    in-out property <bool> autoplay: true;
     in-out property <bool> panel-open: true;
     in-out property <int> search-focus;
 
@@ -1236,6 +1255,7 @@ export component AppWindow inherits Window {
     callback set-keep-songs(bool);
     callback set-offline(bool);
     callback ambience-changed();
+    callback set-autoplay(bool);
 
     // Keyboard shortcuts. Keys typed into the search field go there first.
     keys := FocusScope {
@@ -1347,6 +1367,8 @@ export component AppWindow inherits Window {
                         set-keep-songs(on) => { root.set-keep-songs(on); }
                         set-offline(on) => { root.set-offline(on); }
                         ambience-changed => { root.ambience-changed(); }
+                        autoplay <=> root.autoplay;
+                        set-autoplay(on) => { root.set-autoplay(on); }
                     }
                 }
 

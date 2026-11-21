@@ -7,7 +7,7 @@
 export const meta = {
   id: "youtube-music",
   name: "YouTube Music",
-  version: "0.2.3",
+  version: "0.3.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com"],
@@ -52,6 +52,63 @@ export async function playlist(id) {
   const tracks = collectTracks(data);
   if (tracks.length === 0) throw new Error(`could not read playlist ${id} (${describe(data)})`);
   return tracks;
+}
+
+/**
+ * Songs to play after `track`: YouTube Music's radio for it, the same list
+ * its "Up next" shows. The app filters and orders them by the listener's
+ * own taste.
+ */
+export async function related(track) {
+  if (!track?.id) return [];
+  const data = await api("next", {
+    videoId: track.id,
+    playlistId: `RDAMVM${track.id}`,
+    isAudioOnly: true,
+    params: "wAEB",
+  });
+  const tracks = [];
+  const seen = new Set([track.id]);
+  walk(data, (node) => {
+    const row = node.playlistPanelVideoRenderer;
+    if (!row) return;
+    const song = parsePanelRow(row);
+    if (song && !seen.has(song.id)) {
+      seen.add(song.id);
+      tracks.push(song);
+    }
+  });
+  if (tracks.length === 0) veena.log(`no radio for ${track.id} (${describe(data)})`);
+  return tracks;
+}
+
+/** A row of the "Up next" list: title, then "Artist • Album • Year". */
+function parsePanelRow(row) {
+  const videoId = row.videoId ?? row.navigationEndpoint?.watchEndpoint?.videoId;
+  const title = row.title?.runs?.map((r) => r.text).join("");
+  if (!videoId || !title) return null;
+  const runs = row.longBylineText?.runs ?? row.shortBylineText?.runs ?? [];
+  const artists = [];
+  let album;
+  for (const run of runs) {
+    const text = run.text?.trim();
+    if (!text || text === "•" || text === "&" || text === ",") continue;
+    const page = run.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs
+      ?.browseEndpointContextMusicConfig?.pageType;
+    if (page === "MUSIC_PAGE_TYPE_ALBUM") album = text;
+    else if (page === "MUSIC_PAGE_TYPE_ARTIST" || page === "MUSIC_PAGE_TYPE_USER_CHANNEL") artists.push(text);
+  }
+  if (artists.length === 0 && runs[0]?.text) artists.push(runs[0].text.trim());
+  const length = row.lengthText?.runs?.[0]?.text;
+  const thumbnails = row.thumbnail?.thumbnails ?? [];
+  return {
+    id: videoId,
+    title,
+    artist: artists.join(", ") || undefined,
+    album,
+    durationMs: length && /^\d{1,2}(:\d{2}){1,2}$/.test(length) ? toSeconds(length) * 1000 : undefined,
+    artwork: largeArtwork(thumbnails.at(-1)?.url, videoId),
+  };
 }
 
 // ---------------------------------------------------------------- API

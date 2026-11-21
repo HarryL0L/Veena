@@ -9,7 +9,7 @@ Veena runs it in a sandbox and can update it without an app update.
 
 | Slot | Fill it by exporting | Job |
 |---|---|---|
-| **Search** | `search` (and optionally `playlist`) | Find music and return tracks |
+| **Search** | `search` (and optionally `playlist`, `related`) | Find music and return tracks |
 | **Audio links** | `resolve` | Turn a track into a playable link |
 | **Lyrics** | `lyrics` | Find a song's words, timed to the music if possible |
 
@@ -64,6 +64,7 @@ The plugin folder is `~/.local/share/veena/plugins`. Use `--plugins <folder>` to
 | `meta` | Yes | | Plugin details (see above) |
 | `search(query)` | For the search slot | Search text | List of tracks |
 | `playlist(id)` | No | Playlist or album id | List of tracks |
+| `related(track)` | No | The song playing | Songs that go well after it, best first. Used for autoplay; the app filters and orders them by the listener's taste. |
 | `resolve(track)` | For the audio-link slot | A track of one of `meta.kinds` | One stream, or a list of streams (best first) |
 | `lyrics(track)` | For the lyrics slot | Any track | `{ lines: [{ timeMs?, text }], instrumental? }`, or `null` if none found. Give every line a `timeMs` for synced lyrics. |
 
@@ -172,7 +173,7 @@ veena update --rollback <plugin>    # restore the previous version
 
 | File | Source |
 |---|---|
-| `youtube-music.js` | YouTube Music songs, albums and playlists. Search only; labels tracks `youtube`. Shown under **Music** in the Android app. |
+| `youtube-music.js` | YouTube Music songs, albums and playlists, and its radio for autoplay. Search only; labels tracks `youtube`. Shown under **Music** in the Android app. |
 | `lrclib.js` | Lyrics from [LRCLIB](https://lrclib.net), a free, open lyrics database: synced when available, plain otherwise. Cleans YouTube-style titles first. Try it with `veena lyrics "Title" -a Artist -d 213`. |
 | `youtube-videos.js` | Ordinary YouTube videos. Search only; labels tracks `youtube`. Shown under **Videos** in the Android app. |
 | `youtube-audio.js` | Audio links for `youtube` tracks (AAC). Tries several YouTube app types in turn. |

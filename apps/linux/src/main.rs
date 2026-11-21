@@ -115,6 +115,16 @@ enum Command {
         #[command(flatten)]
         playback: PlaybackArgs,
     },
+    /// List songs that go well after a song (its radio).
+    Radio {
+        /// Catalog id, e.g. `youtube-music`.
+        source: String,
+        /// Song id, e.g. a YouTube video id.
+        id: String,
+        /// Content kind of the song.
+        #[arg(long, default_value = "youtube")]
+        kind: String,
+    },
     /// Check for signed plugin updates and install them.
     Update {
         /// URL of the signed manifest.json.
@@ -245,6 +255,22 @@ async fn main() -> Result<()> {
             if should_play && !tracks.is_empty() {
                 play(registry, tracks, playback).await?;
             }
+            Ok(())
+        }
+        Command::Radio { source, id, kind } => {
+            let registry = registry(plugins_dir.as_ref(), &options, true).await;
+            let Some(provider) = registry.catalog(&source) else {
+                bail!("no catalog `{source}`; run `veena plugins` to see what is installed");
+            };
+            let seed = Track {
+                id: TrackId::new(kind, id),
+                title: String::new(),
+                artist: None,
+                album: None,
+                duration: None,
+                artwork: None,
+            };
+            print_tracks(&provider.related(&seed).await?);
             Ok(())
         }
         Command::Update {

@@ -215,6 +215,21 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
                 )
             }
 
+            group("Playback") {
+                listOf<@Composable () -> Unit>(
+                    {
+                        SwitchItem(
+                            index = 0, count = 1,
+                            icon = R.drawable.ic_queue_music,
+                            title = "Autoplay similar songs",
+                            subtitle = "When the queue runs out, keep going with songs like the last one, picked using what you like and skip.",
+                            checked = settings.autoplay,
+                            onChange = { on -> viewModel.updateSettings { it.copy(autoplay = on) } },
+                        )
+                    },
+                )
+            }
+
             group("Living background", "An animated sky on Home that follows the clock and the calendar.") {
                 val rows = mutableListOf<@Composable (Int, Int) -> Unit>(
                     { i, n ->

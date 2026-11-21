@@ -25,6 +25,14 @@ pub trait Catalog: Send + Sync {
             operation: "playlists",
         })
     }
+
+    /// Songs that go well after `track`, best first (a "radio" for it).
+    async fn related(&self, _track: &Track) -> Result<Vec<Track>> {
+        Err(Error::Unsupported {
+            source_id: self.id().to_owned(),
+            operation: "related songs",
+        })
+    }
 }
 
 /// The audio-link slot: turns a track into playable streams.

@@ -48,6 +48,8 @@ data class SettingsState(
     val southern: Boolean = false,
     /** Lamps on Diwali, fireworks at New Year, hearts on Valentine's Day. */
     val specialDays: Boolean = true,
+    /** Keep playing similar songs when the queue runs out. */
+    val autoplay: Boolean = true,
 )
 
 class Settings(context: Context, private val veena: Veena) {
@@ -64,6 +66,7 @@ class Settings(context: Context, private val veena: Veena) {
             season = runCatching { Season.valueOf(prefs.getString("season", null) ?: "") }.getOrNull(),
             southern = prefs.getBoolean("southern", guessSouthern()),
             specialDays = prefs.getBoolean("specialDays", true),
+            autoplay = prefs.getBoolean("autoplay", true),
         ),
     )
     val state: StateFlow<SettingsState> = _state.asStateFlow()
@@ -85,6 +88,7 @@ class Settings(context: Context, private val veena: Veena) {
             .putString("season", next.season?.name)
             .putBoolean("southern", next.southern)
             .putBoolean("specialDays", next.specialDays)
+            .putBoolean("autoplay", next.autoplay)
             .apply()
         apply(next)
     }
@@ -93,6 +97,7 @@ class Settings(context: Context, private val veena: Veena) {
         veena.setCacheEnabled(s.cacheEnabled)
         veena.setCacheLimitMb(s.cacheLimitMb.toUInt())
         veena.setOffline(s.offline)
+        veena.setAutoplay(s.autoplay)
     }
 
     companion object {

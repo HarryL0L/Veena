@@ -20,6 +20,9 @@ pub struct AmbienceSettings {
     pub season: Option<i32>,
     pub southern: bool,
     pub special_days: bool,
+    /// Add similar songs when the queue runs out (kept here with the other
+    /// desktop settings).
+    pub autoplay: bool,
 }
 
 impl Default for AmbienceSettings {
@@ -30,6 +33,7 @@ impl Default for AmbienceSettings {
             season: None,
             southern: guess_southern(),
             special_days: true,
+            autoplay: true,
         }
     }
 }
@@ -60,6 +64,7 @@ impl AmbienceSettings {
                 "season" => s.season = num(),
                 "southern" => s.southern = v == "true",
                 "special_days" => s.special_days = v == "true",
+                "autoplay" => s.autoplay = v == "true",
                 _ => {}
             }
         }
@@ -73,12 +78,13 @@ impl AmbienceSettings {
         }
         let opt = |o: Option<i32>| o.map(|n| n.to_string()).unwrap_or_else(|| "auto".into());
         let text = format!(
-            "ambience={}\nday_part={}\nseason={}\nsouthern={}\nspecial_days={}\n",
+            "ambience={}\nday_part={}\nseason={}\nsouthern={}\nspecial_days={}\nautoplay={}\n",
             self.enabled,
             opt(self.day_part),
             opt(self.season),
             self.southern,
-            self.special_days
+            self.special_days,
+            self.autoplay
         );
         if let Err(e) = std::fs::write(&file, text) {
             eprintln!("veena: could not save settings: {e}");

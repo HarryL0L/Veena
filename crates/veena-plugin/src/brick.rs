@@ -210,6 +210,13 @@ impl Catalog for PluginBrick {
             .map_err(|e| self.error(e))?;
         convert::tracks(&self.default_kind(), value).map_err(|e| self.error(e))
     }
+    async fn related(&self, track: &Track) -> Result<Vec<Track>> {
+        let value = self
+            .call("related", vec![convert::track_to_js(track)])
+            .await
+            .map_err(|e| self.error(e))?;
+        convert::tracks(&self.default_kind(), value).map_err(|e| self.error(e))
+    }
 }
 
 #[async_trait]

@@ -32,6 +32,19 @@ pub struct Played {
     pub at: u64,
 }
 
+/// A song the listener skipped early, and how often.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Skip {
+    pub id: TrackId,
+    #[serde(default)]
+    pub artist: Option<String>,
+    pub count: u32,
+    pub at: u64,
+}
+
+/// Most skipped songs remembered.
+const SKIP_LIMIT: usize = 500;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Playlist {
     pub id: String,
@@ -53,6 +66,10 @@ struct Data {
     history: Vec<Played>,
     #[serde(default)]
     playlists: Vec<Playlist>,
+    /// Songs skipped in their first seconds, most recent first. Used to
+    /// leave them out of recommendations.
+    #[serde(default)]
+    skips: Vec<Skip>,
 }
 
 pub struct Library {
@@ -135,7 +152,39 @@ impl Library {
     }
 
     pub fn clear_history(&self) {
-        self.change(|d| d.history.clear());
+        self.change(|d| {
+            d.history.clear();
+            d.skips.clear();
+        });
+    }
+
+    // ------------------------------------------------------------ Skips
+
+    /// Note that a song was skipped soon after it started.
+    pub fn record_skip(&self, track: &Track) {
+        self.change(|d| {
+            let count = d
+                .skips
+                .iter()
+                .find(|s| s.id == track.id)
+                .map_or(0, |s| s.count);
+            d.skips.retain(|s| s.id != track.id);
+            d.skips.insert(
+                0,
+                Skip {
+                    id: track.id.clone(),
+                    artist: track.artist.clone(),
+                    count: count + 1,
+                    at: now(),
+                },
+            );
+            d.skips.truncate(SKIP_LIMIT);
+        });
+    }
+
+    /// Skipped songs, most recently skipped first.
+    pub fn skips(&self) -> Vec<Skip> {
+        self.read(|d| d.skips.clone())
     }
 
     // ------------------------------------------------------------ Playlists
@@ -304,6 +353,21 @@ mod tests {
         }
         assert_eq!(lib.history().len(), HISTORY_LIMIT);
         fs::remove_dir_all(lib.path().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn skips_are_counted() {
+        let path = temp_path("skips");
+        let library = Library::open(&path);
+        let song = entry("a").track;
+        library.record_skip(&song);
+        library.record_skip(&song);
+        library.record_skip(&entry("b").track);
+        let skips = Library::open(&path).skips();
+        assert_eq!(skips.len(), 2);
+        assert_eq!(skips[1].id, song.id);
+        assert_eq!(skips[1].count, 2);
+        let _ = fs::remove_file(path);
     }
 
     #[test]
