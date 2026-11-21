@@ -55,6 +55,8 @@ enum Message {
     Clear,
     PlayAt(usize),
     TogglePause,
+    Play,
+    Pause,
     Stop,
     Next,
     Previous,
@@ -143,6 +145,16 @@ impl Player {
     /// Pause if playing; otherwise play (starting the queue if needed).
     pub fn toggle_pause(&self) {
         self.send(Message::TogglePause);
+    }
+
+    /// Play (starting the queue if needed). No effect if already playing.
+    pub fn play(&self) {
+        self.send(Message::Play);
+    }
+
+    /// Pause. No effect unless playing or loading.
+    pub fn pause(&self) {
+        self.send(Message::Pause);
     }
 
     pub fn stop(&self) {
@@ -278,6 +290,24 @@ impl Actor {
                         self.advance(false);
                     }
                 }
+            },
+            Message::Play => match self.state {
+                PlaybackState::Playing => {}
+                PlaybackState::Paused => self.engine.play(),
+                PlaybackState::Loading => self.autoplay = true,
+                PlaybackState::Stopped => {
+                    self.autoplay = true;
+                    if self.queue.current().is_some() {
+                        self.start_current();
+                    } else {
+                        self.advance(false);
+                    }
+                }
+            },
+            Message::Pause => match self.state {
+                PlaybackState::Playing => self.engine.pause(),
+                PlaybackState::Loading => self.autoplay = false,
+                PlaybackState::Paused | PlaybackState::Stopped => {}
             },
             Message::Stop => self.halt(),
             Message::Next => self.advance(true),

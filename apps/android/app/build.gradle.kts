@@ -16,8 +16,15 @@ android {
         applicationId = "dev.veena.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+
+        // Where to look for signed brick updates. Empty means no automatic
+        // updates. Set with -Pveena.updateUrl=... or VEENA_UPDATE_URL.
+        fun setting(name: String, env: String) =
+            providers.gradleProperty(name).orElse(providers.environmentVariable(env)).getOrElse("")
+        buildConfigField("String", "UPDATE_URL", "\"${setting("veena.updateUrl", "VEENA_UPDATE_URL")}\"")
+        buildConfigField("String", "UPDATE_KEY", "\"${setting("veena.updateKey", "VEENA_UPDATE_KEY")}\"")
     }
 
     buildTypes {
@@ -35,6 +42,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -51,6 +59,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.1")
+    implementation("androidx.media3:media3-session:1.11.1")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
     // The Kotlin bindings call the Rust core through JNA.

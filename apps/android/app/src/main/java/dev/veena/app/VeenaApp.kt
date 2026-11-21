@@ -9,11 +9,15 @@ import uniffi.veena_ffi.Veena
 class VeenaApp : Application() {
     lateinit var veena: Veena
         private set
+    lateinit var hub: PlayerHub
+        private set
 
     override fun onCreate() {
         super.onCreate()
         installBundledPlugins()
         veena = Veena(filesDir.absolutePath)
+        hub = PlayerHub(veena)
+        BrickUpdateWorker.schedule(this)
     }
 
     /**

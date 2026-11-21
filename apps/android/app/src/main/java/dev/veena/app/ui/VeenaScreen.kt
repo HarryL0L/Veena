@@ -1,5 +1,9 @@
 package dev.veena.app.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +41,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +69,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
     val player by viewModel.player.collectAsStateWithLifecycle()
     val message by viewModel.messages.collectAsStateWithLifecycle()
     val snackbars = remember { SnackbarHostState() }
+    var expanded by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(message) {
         message?.let {
@@ -95,6 +103,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                     onToggle = viewModel::togglePause,
                     onNext = viewModel::next,
                     onPrevious = viewModel::previous,
+                    onOpen = { expanded = true },
                 )
             }
         },
@@ -114,6 +123,25 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                 }
             }
         }
+    }
+
+    AnimatedVisibility(
+        visible = expanded && player.current != null,
+        enter = slideInVertically { it },
+        exit = slideOutVertically { it },
+    ) {
+        BackHandler { expanded = false }
+        PlayerScreen(
+            player = player,
+            onClose = { expanded = false },
+            onToggle = viewModel::togglePause,
+            onNext = viewModel::next,
+            onPrevious = viewModel::previous,
+            onSeek = viewModel::seek,
+            onShuffle = viewModel::toggleShuffle,
+            onRepeat = viewModel::cycleRepeat,
+            onPlayQueueItem = viewModel::playQueueItem,
+        )
     }
 }
 
@@ -161,18 +189,18 @@ private fun TrackRow(track: TrackInfo, playing: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Artwork(url: String?, sizeDp: Int) {
-    val shape = RoundedCornerShape((sizeDp / 4).dp)
+internal fun Artwork(url: String?, sizeDp: Int, modifier: Modifier = Modifier.size(sizeDp.dp)) {
+    val shape = RoundedCornerShape((sizeDp / 4).coerceAtMost(28).dp)
     if (url != null) {
         AsyncImage(
             model = url,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.size(sizeDp.dp).clip(shape),
+            modifier = modifier.clip(shape),
         )
     } else {
         Box(
-            Modifier.size(sizeDp.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),
+            modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
             Icon(painterResource(R.drawable.ic_music_note), contentDescription = null)
@@ -186,10 +214,12 @@ private fun NowPlayingBar(
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    onOpen: () -> Unit,
 ) {
     val track = player.queue.getOrNull(player.current?.toInt() ?: -1) ?: return
     val duration = player.durationMs?.toLong() ?: track.durationMs?.toLong()
     Surface(
+        onClick = onOpen,
         modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
         shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -236,7 +266,7 @@ private fun NowPlayingBar(
     }
 }
 
-private fun formatTime(ms: Long): String {
+internal fun formatTime(ms: Long): String {
     val total = ms / 1000
     val (h, m, s) = Triple(total / 3600, total / 60 % 60, total % 60)
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)

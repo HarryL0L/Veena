@@ -13,10 +13,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import uniffi.veena_ffi.PlayerListener
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
-import uniffi.veena_ffi.Veena
+import uniffi.veena_ffi.RepeatMode
 
 data class SearchUiState(
     val query: String = "",
@@ -24,27 +23,20 @@ data class SearchUiState(
     val searching: Boolean = false,
 )
 
-class PlayerViewModel(private val veena: Veena) : ViewModel() {
+class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
     private val _search = MutableStateFlow(SearchUiState())
     val search: StateFlow<SearchUiState> = _search.asStateFlow()
 
-    private val _player = MutableStateFlow(veena.state())
-    val player: StateFlow<PlayerState> = _player.asStateFlow()
+    val player: StateFlow<PlayerState> = hub.state
 
     /** One-off messages for a snackbar. */
     private val _messages = MutableStateFlow<String?>(null)
     val messages: StateFlow<String?> = _messages.asStateFlow()
 
     init {
-        veena.setListener(object : PlayerListener {
-            override fun onState(state: PlayerState) {
-                _player.value = state
-            }
-
-            override fun onError(message: String) {
-                _messages.value = friendly(message)
-            }
-        })
+        viewModelScope.launch {
+            hub.errors.collect { _messages.value = friendly(it) }
+        }
     }
 
     fun onQueryChange(query: String) = _search.update { it.copy(query = query) }
@@ -54,7 +46,7 @@ class PlayerViewModel(private val veena: Veena) : ViewModel() {
         if (query.isEmpty()) return
         _search.update { it.copy(searching = true) }
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { veena.search(query) } }
+            val result = withContext(Dispatchers.IO) { runCatching { hub.veena.search(query) } }
             result.onFailure { _messages.value = it.message ?: "Search failed" }
             _search.update { it.copy(searching = false, results = result.getOrDefault(it.results)) }
         }
@@ -62,20 +54,28 @@ class PlayerViewModel(private val veena: Veena) : ViewModel() {
 
     fun play(index: Int) {
         val tracks = _search.value.results
-        viewModelScope.launch(Dispatchers.IO) { veena.play(tracks, index.toUInt()) }
+        hub.send { play(tracks, index.toUInt()) }
     }
 
-    fun playQueueItem(index: Int) = io { veena.playAt(index.toUInt()) }
-    fun togglePause() = io { veena.togglePause() }
-    fun next() = io { veena.next() }
-    fun previous() = io { veena.previous() }
-    fun seek(positionMs: Long) = io { veena.seek(positionMs.toULong()) }
+    fun playQueueItem(index: Int) = hub.send { playAt(index.toUInt()) }
+    fun togglePause() = hub.send { togglePause() }
+    fun next() = hub.send { next() }
+    fun previous() = hub.send { previous() }
+    fun seek(positionMs: Long) = hub.send { seek(positionMs.toULong()) }
+    fun toggleShuffle() {
+        val on = !player.value.shuffle
+        hub.send { setShuffle(on) }
+    }
+    fun cycleRepeat() {
+        val next = when (player.value.repeat) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        }
+        hub.send { setRepeat(next) }
+    }
     fun messageShown() {
         _messages.value = null
-    }
-
-    private fun io(block: () -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) { block() }
     }
 
     companion object {
@@ -97,7 +97,7 @@ class PlayerViewModel(private val veena: Veena) : ViewModel() {
         }
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
-            initializer { PlayerViewModel((this[APPLICATION_KEY] as VeenaApp).veena) }
+            initializer { PlayerViewModel((this[APPLICATION_KEY] as VeenaApp).hub) }
         }
     }
 }

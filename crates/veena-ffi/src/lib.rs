@@ -231,6 +231,14 @@ impl Veena {
         self.player.toggle_pause();
     }
 
+    pub fn play_current(&self) {
+        self.player.play();
+    }
+
+    pub fn pause(&self) {
+        self.player.pause();
+    }
+
     pub fn next(&self) {
         self.player.next();
     }
