@@ -317,7 +317,7 @@ private fun Item(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val shapes = ListItemDefaults.segmentedShapes(index, count)
-    val colors = ListItemDefaults.segmentedColors()
+    val colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
     val leading: @Composable () -> Unit = { IconBadge(icon) }
     val supporting: @Composable () -> Unit = { Text(subtitle) }
     if (onClick != null) {
@@ -354,7 +354,7 @@ private fun SwitchItem(
     ListItem(
         onClick = { onChange(!checked) },
         shapes = ListItemDefaults.segmentedShapes(index, count),
-        colors = ListItemDefaults.segmentedColors(),
+        colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         leadingContent = { IconBadge(icon) },
         supportingContent = { Text(subtitle) },
         trailingContent = {
