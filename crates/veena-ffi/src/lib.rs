@@ -759,7 +759,10 @@ struct AppLogger {
 
 impl log::Log for AppLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Info && metadata.target().starts_with("veena")
+        // Veena's own messages, plus warnings and errors from the libraries
+        // it uses (audio output, networking), which explain most failures.
+        metadata.level() <= log::Level::Warn
+            || (metadata.level() <= log::Level::Info && metadata.target().starts_with("veena"))
     }
 
     fn log(&self, record: &log::Record) {
