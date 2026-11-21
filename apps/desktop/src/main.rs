@@ -742,7 +742,7 @@ fn friendly(message: &str) -> String {
 
 // ---------------------------------------------------------------- Screenshots
 
-/// `--screenshot FILE [--search QUERY] [--videos] [--play N] [--page N] [--size WxH] [--wait SECONDS]`:
+/// `--screenshot FILE [--search QUERY] [--videos] [--play N] [--page N] [--size WxH] [--frames N] [--wait SECONDS]`:
 /// drive the app without a person and save a picture of the window. Used to
 /// show the app from a machine without a screen.
 #[derive(Clone, Default)]
@@ -755,6 +755,8 @@ struct Options {
     wait: u64,
     /// Window size for the picture, e.g. 1360x1500.
     size: Option<(u32, u32)>,
+    /// Several pictures 0.1 s apart, to show motion.
+    frames: u32,
 }
 
 impl Options {
@@ -771,6 +773,9 @@ impl Options {
                 "--play" => options.play = args.next().and_then(|n| n.parse().ok()),
                 "--page" => options.page = args.next().and_then(|n| n.parse().ok()),
                 "--videos" => options.videos = true,
+                "--frames" => {
+                    options.frames = args.next().and_then(|n| n.parse().ok()).unwrap_or(1)
+                }
                 "--size" => {
                     options.size = args.next().and_then(|s| {
                         let (w, h) = s.split_once('x')?;
@@ -782,6 +787,20 @@ impl Options {
             }
         }
         options
+    }
+}
+
+fn snapshot(w: &AppWindow, file: &Path) {
+    match w.window().take_snapshot() {
+        Ok(shot) => {
+            let picture =
+                image::RgbaImage::from_raw(shot.width(), shot.height(), shot.as_bytes().to_vec());
+            match picture.map(|p| p.save(file)) {
+                Some(Ok(())) => eprintln!("saved {}", file.display()),
+                other => eprintln!("could not save the picture: {other:?}"),
+            }
+        }
+        Err(e) => eprintln!("could not take a picture: {e}"),
     }
 }
 
@@ -815,27 +834,31 @@ fn run_screenshot(window: &AppWindow, file: PathBuf, options: Options) {
                 if let (Some(w), Some(p)) = (weak3.upgrade(), page) {
                     w.set_page(p);
                 }
-                let weak4 = weak3.clone();
-                let file = file.clone();
-                slint::Timer::single_shot(Duration::from_millis(800), move || {
-                    if let Some(w) = weak4.upgrade() {
-                        match w.window().take_snapshot() {
-                            Ok(shot) => {
-                                let picture = image::RgbaImage::from_raw(
-                                    shot.width(),
-                                    shot.height(),
-                                    shot.as_bytes().to_vec(),
-                                );
-                                match picture.map(|p| p.save(&file)) {
-                                    Some(Ok(())) => eprintln!("saved {}", file.display()),
-                                    other => eprintln!("could not save the picture: {other:?}"),
-                                }
+                let frames = options.frames.max(1);
+                for n in 0..frames {
+                    let weak4 = weak3.clone();
+                    // With several frames, each gets a number: shot-00.png, shot-01.png...
+                    let file = if frames == 1 {
+                        file.clone()
+                    } else {
+                        file.with_file_name(format!(
+                            "{}-{n:02}.png",
+                            file.file_stem().unwrap_or_default().to_string_lossy()
+                        ))
+                    };
+                    let last = n + 1 == frames;
+                    slint::Timer::single_shot(
+                        Duration::from_millis(800 + 100 * n as u64),
+                        move || {
+                            if let Some(w) = weak4.upgrade() {
+                                snapshot(&w, &file);
                             }
-                            Err(e) => eprintln!("could not take a picture: {e}"),
-                        }
-                    }
-                    let _ = slint::quit_event_loop();
-                });
+                            if last {
+                                let _ = slint::quit_event_loop();
+                            }
+                        },
+                    );
+                }
             });
         });
     });

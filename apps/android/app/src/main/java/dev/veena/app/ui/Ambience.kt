@@ -428,9 +428,11 @@ private fun DrawScope.drawSnow(seeds: Seeds, t: Float, dark: Boolean) {
     val edge = Color(0xFF7D8FB3).copy(alpha = if (dark) 0f else 0.35f)
     val ring = Stroke(0.6.dp.toPx())
     for (p in seeds.particles) {
-        val c = falling(p, t, speed = 22f, sway = 10f)
-        val r = (1.3f + 2.4f * p[1]).dp.toPx()
-        drawCircle(color.copy(alpha = 0.55f + 0.4f * p[1]), r, c)
+        // Bigger flakes are nearer: they fall faster and sway more.
+        val c = falling(p, t, speed = 22f + 26f * p[1], sway = 10f + 10f * p[1])
+        val r = (1.6f + 2.8f * p[1]).dp.toPx()
+        drawCircle(color.copy(alpha = 0.18f), r * 2.2f, c)
+        drawCircle(color.copy(alpha = 0.6f + 0.35f * p[1]), r, c)
         if (!dark) drawCircle(edge, r, c, style = ring)
     }
 }
@@ -440,7 +442,7 @@ private val PETALS = listOf(Color(0xFFF7B6CF), Color(0xFFFFD6E5), Color(0xFFF48F
 private fun DrawScope.drawPetals(seeds: Seeds, t: Float) {
     for (i in 0 until 20) {
         val p = seeds.particles[i]
-        val c = falling(p, t, speed = 16f, sway = 14f, drift = 10f)
+        val c = falling(p, t, speed = 26f, sway = 20f, drift = 18f)
         val s = 0.7f + 0.6f * p[1]
         val w = 7.dp.toPx() * s
         val h = 4.5.dp.toPx() * s
@@ -450,22 +452,25 @@ private fun DrawScope.drawPetals(seeds: Seeds, t: Float) {
     }
 }
 
-private val LEAVES = listOf(Color(0xFFE07A3F), Color(0xFFC8553D), Color(0xFFE9A23B), Color(0xFFA0522D))
+private val LEAVES = listOf(Color(0xFFFF8A4C), Color(0xFFE8613F), Color(0xFFFFB84D), Color(0xFFD9763A))
 
 private fun DrawScope.drawLeaves(seeds: Seeds, t: Float) {
     for (i in 0 until 16) {
         val p = seeds.particles[i]
-        val c = falling(p, t, speed = 18f, sway = 18f, drift = -6f)
-        val len = (8f + 5f * p[1]).dp.toPx()
-        val angle = sin(t * (0.8f + p[4]) + p[5] * 6.28f) * 70f + p[5] * 360f
+        val c = falling(p, t, speed = 34f, sway = 30f, drift = -10f)
+        val len = (12f + 7f * p[1]).dp.toPx()
+        // Rocking side to side while slowly turning over...
+        val angle = sin(t * (1.4f + p[4]) + p[5] * 6.28f) * 60f + t * (p[5] - 0.5f) * 80f + p[5] * 360f
+        // ...and flipping, so it shows its edge now and then.
+        val flip = cos(t * (1.8f + 1.4f * p[2]) + p[4] * 6.28f).let { if (it < 0f) -it else it }.coerceAtLeast(0.18f)
         val color = LEAVES[i % LEAVES.size]
         withTransform({
             translate(c.x, c.y)
             rotate(angle, Offset.Zero)
-            scale(len, len, Offset.Zero)
-        }) { drawPath(seeds.leaf, color.copy(alpha = 0.92f)) }
-        rotate(angle, c) {
-            drawLine(lerp(color, Color.Black, 0.3f), Offset(c.x - len / 2, c.y), Offset(c.x + len * 0.6f, c.y), strokeWidth = 0.8.dp.toPx())
+            scale(len, len * flip, Offset.Zero)
+        }) {
+            drawPath(seeds.leaf, color.copy(alpha = 0.92f))
+            drawLine(lerp(color, Color.Black, 0.3f), Offset(-0.5f, 0f), Offset(0.6f, 0f), strokeWidth = 0.08f)
         }
     }
 }
@@ -476,19 +481,23 @@ private fun DrawScope.drawSummer(seeds: Seeds, t: Float, night: Float) {
         val p = seeds.particles[i]
         if (night < 0.98f) {
             // Rising motes of light.
-            val c = falling(p, -t, speed = 7f, sway = 8f)
+            val c = falling(p, -t, speed = 12f, sway = 10f)
             val a = (1f - night) * (0.4f + 0.4f * sin(t * 1.3f + p[5] * 6.28f).coerceAtLeast(0f))
             val r = (1.4f + 1.8f * p[1]).dp.toPx()
             drawCircle(Color(0xFFFFF4C2).copy(alpha = a * 0.35f), r * 3f, c)
             drawCircle(Color(0xFFFFF8DC).copy(alpha = a), r, c)
         }
         if (night > 0.02f) {
-            // Fireflies wander and blink.
+            // Fireflies roam the whole sky in looping paths, glowing on and off.
+            val w = size.width + 40.dp.toPx()
+            val dir = if (p[4] < 0.5f) -1f else 1f
             val c = Offset(
-                size.width * p[0] + sin(t * (0.25f + p[4] * 0.3f) + p[5] * 6.28f) * 34.dp.toPx(),
-                size.height * (0.2f + 0.7f * p[3]) + cos(t * (0.3f + p[2] * 0.3f) + p[5] * 6.28f) * 18.dp.toPx(),
+                ((p[0] * w + dir * t * (8f + 14f * p[2]).dp.toPx()) % w + w) % w - 20.dp.toPx() +
+                    sin(t * (0.7f + p[4] * 0.6f) + p[5] * 6.28f) * 46.dp.toPx(),
+                size.height * (0.15f + 0.65f * p[3]) +
+                    sin(t * (0.9f + p[2] * 0.7f) + p[5] * 3.1f) * 30.dp.toPx(),
             )
-            val blink = sin(t * (1.2f + p[1]) + p[5] * 6.28f).coerceAtLeast(0f)
+            val blink = (0.15f + sin(t * (1.1f + p[1]) + p[5] * 6.28f)).coerceIn(0f, 1f)
             val a = night * blink
             drawCircle(Color(0xFFE6FF8A).copy(alpha = a * 0.3f), 7.dp.toPx(), c)
             drawCircle(Color(0xFFF4FFB8).copy(alpha = a), 1.8.dp.toPx(), c)

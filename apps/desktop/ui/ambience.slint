@@ -138,13 +138,16 @@ export component AmbientScene inherits Rectangle {
             t: root.t;
             area-width: root.width;
             area-height: root.height;
-            speed: 22;
-            sway: 10;
-            width: (1.3 + 2.4 * Rand.hash(i + 1.0)) * 2px;
+            // Bigger flakes are nearer: they fall faster and sway more.
+            speed: 22 + 26 * Rand.hash(i + 1.0);
+            sway: 10 + 10 * Rand.hash(i + 1.0);
+            width: (1.6 + 2.8 * Rand.hash(i + 1.0)) * 2px;
             height: self.width;
             border-radius: self.width / 2;
             background: white;
-            opacity: 0.55 + 0.4 * Rand.hash(i + 1.0);
+            drop-shadow-blur: 4px;
+            drop-shadow-color: #ffffff80;
+            opacity: 0.6 + 0.35 * Rand.hash(i + 1.0);
         }
     }
 
@@ -155,9 +158,9 @@ export component AmbientScene inherits Rectangle {
             t: root.t;
             area-width: root.width;
             area-height: root.height;
-            speed: 16;
-            sway: 14;
-            drift: 10;
+            speed: 26;
+            sway: 20;
+            drift: 18;
             width: 11px * (0.7 + 0.6 * Rand.hash(i + 1.0));
             height: self.width * 0.62;
             border-radius: self.height / 2;
@@ -174,15 +177,18 @@ export component AmbientScene inherits Rectangle {
             t: root.t;
             area-width: root.width;
             area-height: root.height;
-            speed: 18;
-            sway: 18;
-            drift: -6;
-            width: (9 + 6 * Rand.hash(i + 1.0)) * 1px;
+            speed: 34;
+            sway: 30;
+            drift: -10;
+            width: (12 + 7 * Rand.hash(i + 1.0)) * 1px;
             height: self.width * 0.55;
             border-top-left-radius: self.height;
             border-bottom-right-radius: self.height;
-            background: Rand.hash(i + 8.0) < 0.25 ? #e07a3f : Rand.hash(i + 8.0) < 0.5 ? #c8553d : Rand.hash(i + 8.0) < 0.75 ? #e9a23b : #a0522d;
-            transform-rotation: (sin((root.t * (0.8 + Rand.hash(i + 4.0)) + Rand.hash(i + 5.0) * 6.28) * 1rad) * 70 + Rand.hash(i + 5.0) * 360) * 1deg;
+            background: Rand.hash(i + 8.0) < 0.25 ? #ff8a4c : Rand.hash(i + 8.0) < 0.5 ? #e8613f : Rand.hash(i + 8.0) < 0.75 ? #ffb84d : #d9763a;
+            // Rocking, slowly turning over, and flipping to show its edge.
+            transform-rotation: (sin((root.t * (1.4 + Rand.hash(i + 4.0)) + Rand.hash(i + 5.0) * 6.28) * 1rad) * 60
+                + root.t * (Rand.hash(i + 5.0) - 0.5) * 80 + Rand.hash(i + 5.0) * 360) * 1deg;
+            transform-scale-y: max(0.18, abs(cos((root.t * (1.8 + 1.4 * Rand.hash(i + 2.0)) + Rand.hash(i + 4.0) * 6.28) * 1rad)));
             opacity: 0.92;
         }
     }
@@ -194,8 +200,8 @@ export component AmbientScene inherits Rectangle {
             t: -root.t;
             area-width: root.width;
             area-height: root.height;
-            speed: 7;
-            sway: 8;
+            speed: 12;
+            sway: 10;
             width: (1.4 + 1.8 * Rand.hash(i + 1.0)) * 2px;
             height: self.width;
             border-radius: self.width / 2;
@@ -207,15 +213,19 @@ export component AmbientScene inherits Rectangle {
     }
     if info.season == 1 && info.night > 0.02: Rectangle {
         for i in 18: Rectangle {
-            x: root.width * Rand.hash(i + 0.5) + sin((root.t * (0.25 + Rand.hash(i + 4.0) * 0.3) + Rand.hash(i + 5.0) * 6.28) * 1rad) * 34px;
-            y: root.height * (0.2 + 0.7 * Rand.hash(i + 3.0)) + cos((root.t * (0.3 + Rand.hash(i + 2.0) * 0.3) + Rand.hash(i + 5.0) * 6.28) * 1rad) * 18px;
+            // Roaming the whole sky in looping paths.
+            property <float> w: root.width / 1px + 40;
+            property <float> dir: Rand.hash(i + 4.0) < 0.5 ? -1 : 1;
+            x: (Rand.wrap(Rand.hash(i + 0.5) * self.w + self.dir * root.t * (8 + 14 * Rand.hash(i + 2.0)), self.w) - 20) * 1px
+                + sin((root.t * (0.7 + Rand.hash(i + 4.0) * 0.6) + Rand.hash(i + 5.0) * 6.28) * 1rad) * 46px;
+            y: root.height * (0.15 + 0.65 * Rand.hash(i + 3.0)) + sin((root.t * (0.9 + Rand.hash(i + 2.0) * 0.7) + Rand.hash(i + 5.0) * 3.1) * 1rad) * 30px;
             width: 4px;
             height: 4px;
             border-radius: 2px;
             background: #f4ffb8;
             drop-shadow-blur: 8px;
             drop-shadow-color: #e6ff8a;
-            opacity: root.info.night * max(0, sin((root.t * (1.2 + Rand.hash(i + 1.0)) + Rand.hash(i + 5.0) * 6.28) * 1rad));
+            opacity: root.info.night * clamp(0.15 + sin((root.t * (1.1 + Rand.hash(i + 1.0)) + Rand.hash(i + 5.0) * 6.28) * 1rad), 0, 1);
         }
     }
 
