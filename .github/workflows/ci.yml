@@ -58,8 +58,8 @@ jobs:
         run: |
           out=apps/android/app/build/outputs/apk/release
           mkdir -p dist
-          cp "$out/app-arm64-v8a-release.apk" dist/veena-phone-arm64.apk
-          cp "$out/app-x86_64-release.apk" dist/veena-emulator-x86_64.apk
+          cp "$out/app-arm64-v8a-release.apk" dist/veena-arm64.apk
+          cp "$out/app-x86_64-release.apk" dist/veena-x86_64.apk
           ls -l dist
       - uses: actions/upload-artifact@v7
         with:
@@ -74,7 +74,7 @@ jobs:
           MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           gh release delete nightly --yes --cleanup-tag || true
-          printf 'Built from %s on branch %s.\n\n%s\n\nInstall **veena-phone-arm64.apk** on a phone. The x86_64 file is for emulators.\n' \
+          printf 'Built from %s on branch %s.\n\n%s\n\nInstall **veena-arm64.apk** on a phone. The x86_64 file is for emulators.\n' \
             "${GITHUB_SHA::7}" "$GITHUB_REF_NAME" "$(printf '%s' "$MESSAGE" | head -1)" > notes.md
           gh release create nightly dist/*.apk --prerelease --title "Nightly build" \
             --notes-file notes.md --target "$GITHUB_SHA"
