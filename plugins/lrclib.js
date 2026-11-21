@@ -7,7 +7,7 @@
 export const meta = {
   id: "lrclib",
   name: "LRCLIB",
-  version: "1.0.0",
+  version: "1.1.0",
   api: 1,
   domains: ["lrclib.net"],
 };
@@ -66,19 +66,40 @@ function toLyrics(r) {
   return null;
 }
 
-/** "[01:02.34] words" lines into { timeMs, text }, in time order. */
+/**
+ * "[01:02.34] words" lines into { timeMs, text, words }, in time order.
+ * Enhanced LRC marks each word too: "[00:18.89] <00:18.89>We're <00:19.25>no".
+ */
 function parseLrc(text) {
   const lines = [];
   for (const raw of text.split("\n")) {
     const stamps = [...raw.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
     if (stamps.length === 0) continue;
-    // Word-by-word timing marks like <00:18.89> aren't needed.
-    const words = raw.replace(/\[[^\]]*\]/g, "").replace(/<\d+:\d+(?:\.\d+)?>/g, "").replace(/\s+/g, " ").trim();
+    const body = raw.replace(/\[[^\]]*\]/g, "");
+    const words = parseWords(body);
+    const plain = body.replace(/<\d+:\d+(?:\.\d+)?>/g, "").replace(/\s+/g, " ").trim();
     for (const s of stamps) {
-      lines.push({ timeMs: Math.round((Number(s[1]) * 60 + Number(s[2])) * 1000), text: words });
+      lines.push({ timeMs: toMs(s[1], s[2]), text: plain, ...(words.length ? { words } : {}) });
     }
   }
   return lines.sort((a, b) => a.timeMs - b.timeMs);
+}
+
+/** Words after <mm:ss.xx> marks, each keeping the space that follows it. */
+function parseWords(body) {
+  const marks = [...body.matchAll(/<(\d+):(\d+(?:\.\d+)?)>/g)];
+  const words = [];
+  marks.forEach((m, i) => {
+    const start = m.index + m[0].length;
+    const end = i + 1 < marks.length ? marks[i + 1].index : body.length;
+    const text = body.slice(start, end).replace(/\s+/g, " ");
+    if (text.trim()) words.push({ timeMs: toMs(m[1], m[2]), text: text.trimStart() });
+  });
+  return words;
+}
+
+function toMs(minutes, seconds) {
+  return Math.round((Number(minutes) * 60 + Number(seconds)) * 1000);
 }
 
 /** Strip video extras from a title and find the real artist. */

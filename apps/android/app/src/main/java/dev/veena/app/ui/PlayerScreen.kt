@@ -269,7 +269,7 @@ fun PlayerScreen(
                 }
 
                 item {
-                    LyricsCard(lyrics, player.positionMs.toLong(), onSeek)
+                    LyricsCard(lyrics, player.positionMs.toLong(), playing, onSeek)
                 }
 
                 if (player.queue.size > 1) {

@@ -111,6 +111,19 @@ pub fn track_to_js(track: &Track) -> Value {
 struct JsLyricLine {
     time_ms: Option<f64>,
     text: String,
+    #[serde(default)]
+    words: Vec<JsLyricWord>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsLyricWord {
+    time_ms: f64,
+    text: String,
+}
+
+fn millis(t: f64) -> Option<std::time::Duration> {
+    (t.is_finite() && t >= 0.0).then(|| std::time::Duration::from_millis(t as u64))
 }
 
 #[derive(Deserialize)]
@@ -133,11 +146,19 @@ pub fn lyrics(value: Value, source: &str) -> Result<Option<veena_core::Lyrics>, 
         .into_iter()
         .take(2000)
         .map(|l| veena_core::LyricLine {
-            time: l
-                .time_ms
-                .filter(|t| t.is_finite() && *t >= 0.0)
-                .map(|t| std::time::Duration::from_millis(t as u64)),
+            time: l.time_ms.and_then(millis),
             text: l.text.chars().take(500).collect(),
+            words: l
+                .words
+                .into_iter()
+                .take(200)
+                .filter_map(|w| {
+                    Some(veena_core::LyricWord {
+                        time: millis(w.time_ms)?,
+                        text: w.text.chars().take(100).collect(),
+                    })
+                })
+                .collect(),
         })
         .collect::<Vec<_>>();
     if lines.is_empty() && !js.instrumental {

@@ -14,7 +14,7 @@ mod url_source;
 
 pub use brick::{Catalog, Resolver};
 pub use error::{Error, Result};
-pub use lyrics::{LyricLine, Lyrics};
+pub use lyrics::{LyricLine, LyricWord, Lyrics};
 pub use queue::{Queue, Repeat};
 pub use registry::SourceRegistry;
 pub use track::{Stream, StreamLocation, Track, TrackId};

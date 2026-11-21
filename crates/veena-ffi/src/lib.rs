@@ -80,6 +80,15 @@ pub struct PlayerState {
 pub struct LyricLineInfo {
     pub time_ms: Option<u64>,
     pub text: String,
+    /// Word-by-word timing, when the lyrics have it.
+    pub words: Vec<LyricWordInfo>,
+}
+
+/// One word (with any space after it) and when it is sung.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct LyricWordInfo {
+    pub time_ms: u64,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -265,6 +274,14 @@ impl Veena {
                             .map(|l| LyricLineInfo {
                                 time_ms: l.time.map(|t| t.as_millis() as u64),
                                 text: l.text,
+                                words: l
+                                    .words
+                                    .into_iter()
+                                    .map(|w| LyricWordInfo {
+                                        time_ms: w.time.as_millis() as u64,
+                                        text: w.text,
+                                    })
+                                    .collect(),
                             })
                             .collect(),
                     });

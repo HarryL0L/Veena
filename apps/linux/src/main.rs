@@ -696,6 +696,9 @@ async fn show_lyrics(
                 if lyrics.instrumental {
                     println!("  Instrumental: no lyrics.");
                 }
+                if lyrics.lines.iter().any(|l| !l.words.is_empty()) {
+                    println!("  (timed word by word)\n");
+                }
                 for line in &lyrics.lines {
                     match line.time {
                         Some(t) => println!(
