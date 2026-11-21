@@ -42,7 +42,7 @@ class PlayerViewModel(private val veena: Veena) : ViewModel() {
             }
 
             override fun onError(message: String) {
-                _messages.value = message
+                _messages.value = friendly(message)
             }
         })
     }
@@ -79,6 +79,23 @@ class PlayerViewModel(private val veena: Veena) : ViewModel() {
     }
 
     companion object {
+        /** A short, plain message for an error from the core. */
+        fun friendly(message: String): String {
+            val title = Regex("^cannot play (.+?): ").find(message)?.groupValues?.get(1)
+            val what = if (title != null) "Can't play \"$title\"" else "Something went wrong"
+            val why = when {
+                "proof-of-origin" in message || "403 at the end" in message ->
+                    "YouTube only allows this music track in its own apps for now."
+                "403 at the start" in message || "not available" in message ->
+                    "YouTube won't serve this one here."
+                "nothing installed can play" in message -> "No installed brick can play it."
+                "Unable to resolve host" in message || "network" in message.lowercase() ->
+                    "Check your internet connection."
+                else -> null
+            }
+            return listOfNotNull(what, why).joinToString(". ")
+        }
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer { PlayerViewModel((this[APPLICATION_KEY] as VeenaApp).veena) }
         }
