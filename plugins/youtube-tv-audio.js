@@ -53,8 +53,13 @@ const QUEST = {
   extra: { deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L" },
 };
 
-/** App types to try, in order; replaceable through `veena.config.tvClients`. */
-const CLIENTS = veena.config.tvClients ?? [TV_SIMPLY, TV, QUEST];
+/**
+ * App types to try, in order; replaceable through `veena.config.tvClients`.
+ * TV ("The page needs to be reloaded") and QUEST (cut off after 1 MB) fail
+ * as of November 2026, so by default only TV_SIMPLY is used; they are kept
+ * for when YouTube changes again.
+ */
+const CLIENTS = veena.config.tvClients ?? [TV_SIMPLY];
 /** Links without a proof-of-origin token stop working after this point. */
 const TOKEN_FREE_LIMIT = 1024 * 1024;
 
