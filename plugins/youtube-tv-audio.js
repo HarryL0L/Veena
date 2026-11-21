@@ -21,7 +21,7 @@
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "1.3.0",
+  version: "1.3.1",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -68,6 +68,7 @@ const VISIONOS = {
   userAgent:
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
   extra: { deviceMake: "Apple", deviceModel: "RealityDevice17,1", osName: "visionOS", osVersion: "26.5.23O471" },
+  plain: true,
 };
 
 /** The TV app as a Samsung TV runs it; needs no token (yt-dlp 2026.10.26). */
@@ -112,9 +113,8 @@ let player;
 const lengths = new Map();
 
 export async function resolve(track) {
-  const solved = await getPlayer();
   const problems = [];
-  const direct = await streamsForVideo(track.id, solved, problems);
+  const direct = await streamsForVideo(track.id, problems);
   if (direct) return direct;
 
   // Official music tracks need a proof-of-origin token past the first
@@ -122,7 +122,7 @@ export async function resolve(track) {
   if (veena.config.videoFallback !== false) {
     for (const video of await similarVideos(track)) {
       veena.log(`trying ${video.id} "${video.title}" (${video.seconds} s) instead`);
-      const streams = await streamsForVideo(video.id, solved, problems);
+      const streams = await streamsForVideo(video.id, problems);
       if (streams) {
         veena.log(`playing ${video.id} "${video.title}" in place of ${track.id}`);
         return streams;
@@ -133,7 +133,7 @@ export async function resolve(track) {
 }
 
 /** Working streams for one video, trying each app type; problems are collected. */
-async function streamsForVideo(videoId, solved, problems) {
+async function streamsForVideo(videoId, problems) {
   for (const client of CLIENTS) {
     let label = `${client.name} ${client.version}`;
     try {
@@ -141,6 +141,9 @@ async function streamsForVideo(videoId, solved, problems) {
       if (client.needsToken && !token) continue;
       const current = await withCurrentVersion(client);
       label = `${current.name} ${current.version}`;
+      // Only app types with scrambled links need YouTube's player code,
+      // which takes a few seconds to download and run the first time.
+      const solved = client.plain ? undefined : await getPlayer();
       const streams = await streamsFrom(current, videoId, solved, token);
       // `--config probe=false` skips the download check, for diagnosis.
       if (veena.config.logUrls) veena.log(`${videoId} ${label}: ${streams[0].url}`);
@@ -232,7 +235,10 @@ async function streamsFrom(client, videoId, solved, token) {
       },
       videoId,
       playbackContext: {
-        contentPlaybackContext: { signatureTimestamp: solved.signatureTimestamp, html5Preference: "HTML5_PREF_WANTS" },
+        contentPlaybackContext: {
+          ...(solved ? { signatureTimestamp: solved.signatureTimestamp } : {}),
+          html5Preference: "HTML5_PREF_WANTS",
+        },
       },
       contentCheckOk: true,
       racyCheckOk: true,
@@ -288,6 +294,11 @@ async function withCurrentVersion(client) {
 /** A format's playable URL: signature added and "n" transformed. */
 function unscramble(format, solved) {
   let url = format.url;
+  // Plain app types: links are ready to use.
+  if (!solved) {
+    if (!url) throw new Error("scrambled link from an app type marked plain");
+    return url;
+  }
   const cipher = format.signatureCipher ?? format.cipher;
   if (cipher) {
     const parts = parseQuery(cipher);
