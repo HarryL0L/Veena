@@ -17,7 +17,7 @@
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "1.0.0",
+  version: "1.1.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -61,27 +61,97 @@ const TOKEN_FREE_LIMIT = 1024 * 1024;
 /** The solved player, kept for as long as this brick runs. */
 let player;
 
+/** Video lengths in seconds from player replies, by video id. */
+const lengths = new Map();
+
 export async function resolve(track) {
   const solved = await getPlayer();
   const problems = [];
+  const direct = await streamsForVideo(track.id, solved, problems);
+  if (direct) return direct;
+
+  // Official music tracks need a proof-of-origin token past the first
+  // megabyte. Look for an ordinary upload of the same song instead.
+  if (veena.config.videoFallback !== false) {
+    for (const video of await similarVideos(track)) {
+      veena.log(`trying ${video.id} "${video.title}" (${video.seconds} s) instead`);
+      const streams = await streamsForVideo(video.id, solved, problems);
+      if (streams) {
+        veena.log(`playing ${video.id} "${video.title}" in place of ${track.id}`);
+        return streams;
+      }
+    }
+  }
+  throw new Error(problems.join("; "));
+}
+
+/** Working streams for one video, trying each app type; problems are collected. */
+async function streamsForVideo(videoId, solved, problems) {
   for (const client of CLIENTS) {
     let label = `${client.name} ${client.version}`;
     try {
       const current = await withCurrentVersion(client);
       label = `${current.name} ${current.version}`;
-      const streams = await streamsFrom(current, track.id, solved);
+      const streams = await streamsFrom(current, videoId, solved);
       // `--config probe=false` skips the download check, for diagnosis.
       const failure = veena.config.probe === false ? undefined : await probe(streams[0]);
       if (failure) throw new Error(`links refused when downloading ${failure}`);
-      veena.log(`${label}: links work`);
+      veena.log(`${label}: links work for ${videoId}`);
       return streams.map(({ size, ...stream }) => stream);
     } catch (e) {
-      const problem = `${label}: ${e.message ?? e}`;
+      const problem = `${videoId} ${label}: ${e.message ?? e}`;
       veena.log(problem);
       problems.push(problem);
     }
   }
-  throw new Error(problems.join("; "));
+  return undefined;
+}
+
+/**
+ * Ordinary YouTube uploads that are probably the same song: found by title
+ * and artist, of nearly the same length, best match first.
+ */
+async function similarVideos(track) {
+  const query = [track.title, track.artist].filter(Boolean).join(" ");
+  if (!query) return [];
+  const home = await homePage();
+  const res = await veena.http.fetch(`${BASE}/youtubei/v1/search?prettyPrint=false`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-YouTube-Client-Name": "1",
+      "X-YouTube-Client-Version": home.webVersion,
+      ...(home.visitor ? { "X-Goog-Visitor-Id": home.visitor } : {}),
+    },
+    body: JSON.stringify({
+      context: { client: { clientName: "WEB", clientVersion: home.webVersion, hl: "en", gl: veena.config.region ?? "US" } },
+      query,
+    }),
+  });
+  if (!res.ok) {
+    veena.log(`video search failed with status ${res.status}`);
+    return [];
+  }
+  const wanted = track.durationMs ? track.durationMs / 1000 : lengths.get(track.id);
+  const title = track.title.toLowerCase();
+  // Words that mark a different recording, unless the original has them too.
+  const different = ["tutorial", "karaoke", "cover", "instrumental", "lesson", "how to", "reaction", "live", "slowed", "sped up", "8d", "nightcore"]
+    .filter((word) => !title.includes(word));
+  const videos = [];
+  walk(res.json(), (node) => {
+    const v = node.videoRenderer;
+    if (!v?.videoId || v.videoId === track.id) return;
+    const seconds = toSeconds(v.lengthText?.simpleText ?? "");
+    if (!seconds) return;
+    if (wanted && Math.abs(seconds - wanted) > Math.max(10, wanted * 0.1)) return;
+    const name = (v.title?.runs ?? []).map((r) => r.text).join("");
+    const lower = name.toLowerCase();
+    if (different.some((word) => lower.includes(word))) return;
+    videos.push({ id: v.videoId, title: name, seconds, score: lower.includes(title) ? 0 : 1 });
+  });
+  videos.sort((a, b) => a.score - b.score);
+  veena.log(`video search "${query}" (${wanted ? `${Math.round(wanted)} s` : "length unknown"}): ${videos.length} similar`);
+  return videos.slice(0, veena.config.videoFallbackTries ?? 3);
 }
 
 async function streamsFrom(client, videoId, solved) {
@@ -119,6 +189,8 @@ async function streamsFrom(client, videoId, solved) {
   });
   if (!res.ok) throw new Error(`player request failed with status ${res.status}`);
   const data = res.json();
+  const length = Number(data.videoDetails?.lengthSeconds);
+  if (length) lengths.set(videoId, length);
   const status = data.playabilityStatus?.status;
   if (status !== "OK") {
     throw new Error(`${status ?? "unknown status"}: ${data.playabilityStatus?.reason ?? "no reason given"}`);
@@ -642,20 +714,40 @@ function debugGrep(code, pattern, context) {
   }
 }
 
-async function visitorData() {
-  const cached = veena.cache.get("visitor");
-  if (cached) return cached;
+/** YouTube's anonymous visitor id and current web app version, cached. */
+async function homePage() {
+  const cached = veena.cache.get("home");
+  if (cached) return JSON.parse(cached);
+  const home = { visitor: undefined, webVersion: "2.20251119.01.00" };
   try {
     const res = await veena.http.fetch(`${BASE}/`, { headers: { Cookie: "SOCS=CAI", "Accept-Language": "en" } });
-    const match = /"VISITOR_DATA":"([^"]+)"/.exec(res.text);
-    if (match) {
-      veena.cache.set("visitor", match[1], 6 * 3600);
-      return match[1];
-    }
+    home.visitor = /"VISITOR_DATA":"([^"]+)"/.exec(res.text)?.[1];
+    home.webVersion = /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/.exec(res.text)?.[1] ?? home.webVersion;
   } catch (e) {
-    veena.log(`could not get a visitor id: ${e}`);
+    veena.log(`could not read the YouTube home page: ${e}`);
   }
-  return undefined;
+  veena.cache.set("home", JSON.stringify(home), 6 * 3600);
+  return home;
+}
+
+async function visitorData() {
+  return (await homePage()).visitor;
+}
+
+/** Call `visit` on every object in a JSON tree. */
+function walk(node, visit) {
+  if (Array.isArray(node)) {
+    for (const item of node) walk(item, visit);
+  } else if (node && typeof node === "object") {
+    visit(node);
+    for (const key in node) walk(node[key], visit);
+  }
+}
+
+/** "1:02:03" or "3:45" in seconds; 0 if not a clock time. */
+function toSeconds(clock) {
+  if (!/^\d{1,2}(:\d{2}){1,2}$/.test(clock)) return 0;
+  return clock.split(":").reduce((total, part) => total * 60 + Number(part), 0);
 }
 
 function parseQuery(query) {

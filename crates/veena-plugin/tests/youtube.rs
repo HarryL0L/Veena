@@ -108,6 +108,23 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
             "text/html",
             r#"<html><script>ytcfg.set({"INNERTUBE_CLIENT_VERSION":"1.20990101.00.00","VISITOR_DATA":"VIS123"});</script></html>"#.into(),
         ),
+        ("POST", "/youtubei/v1/search")
+            if request.body.contains("\"clientName\":\"WEB\"") =>
+        {
+            // Ordinary video search: a tutorial, wrong lengths, and the
+            // right upload.
+            let video = |id: &str, title: &str, length: &str| {
+                json!({"videoRenderer": {"videoId": id, "title": {"runs": [{"text": title}]}, "lengthText": {"simpleText": length}}})
+            };
+            ("application/json", json!({"contents": {"twoColumnSearchResultsRenderer": {"primaryContents": {"sectionListRenderer": {"contents": [
+                {"itemSectionRenderer": {"contents": [
+                    video("capped", "Doodle (the track itself)", "2:45"),
+                    video("tutorial", "How to play Doodle - piano tutorial", "2:44"),
+                    video("long", "Doodle (extended mix)", "9:30"),
+                    video("upload", "Zachz Winner - Doodle (Official Audio)", "2:46"),
+                ]}}
+            ]}}}}}).to_string())
+        }
         ("POST", "/youtubei/v1/search") => {
             let body: Value = serde_json::from_str(&request.body).unwrap();
             let mut seen = seen.lock().unwrap();
@@ -140,17 +157,20 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
         ("POST", "/youtubei/v1/player") if request.header("user-agent").contains("Cobalt") => {
             let body: Value = serde_json::from_str(&request.body).unwrap();
             let sts = &body["playbackContext"]["contentPlaybackContext"]["signatureTimestamp"];
+            let video = body["videoId"].as_str().unwrap_or_default();
             let response = if sts != 20123 {
                 json!({"playabilityStatus": {"status": "UNPLAYABLE", "reason": format!("bad signature timestamp {sts}")}})
+            } else if video == "capped" {
+                capped_response(base)
             } else {
-                let stream = format!("{base}/tvstream?id=hi&n={SCRAMBLED_N}");
+                let stream = format!("{base}/tvstream?id=hi&v={video}&n={SCRAMBLED_N}");
                 json!({
                     "playabilityStatus": {"status": "OK"},
                     "streamingData": {"adaptiveFormats": [
                         {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000, "contentLength": "5000000",
                          "signatureCipher": format!("s={}&sp=sig&url={}", SCRAMBLED_SIGNATURE, percent_encode(&stream))},
                         {"itag": 139, "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"", "bitrate": 50000, "contentLength": "2000000",
-                         "url": format!("{base}/tvstream?id=lo&n={SCRAMBLED_N}")},
+                         "url": format!("{base}/tvstream?id=lo&v={video}&n={SCRAMBLED_N}")},
                         {"itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 160000, "url": format!("{base}/opus")},
                     ]}
                 })
@@ -167,6 +187,8 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
             // switched off for this video.
             let response = if (user_agent.contains("oculus") && !has_visitor) || (user_agent.contains("ios") && video == "ios-off") {
                 json!({"playabilityStatus": {"status": "LOGIN_REQUIRED", "reason": "Sign in to confirm you're not a bot"}})
+            } else if video == "capped" {
+                capped_response(base)
             } else if video == "denied" {
                 json!({
                     "playabilityStatus": {"status": "OK"},
@@ -207,6 +229,17 @@ fn respond(request: &Request, seen: &Mutex<Seen>, base: &str) -> (&'static str, 
         }
         _ => ("text/plain", String::new()),
     }
+}
+
+/// A music track whose links stop after the first megabyte.
+fn capped_response(base: &str) -> Value {
+    json!({
+        "playabilityStatus": {"status": "OK"},
+        "videoDetails": {"lengthSeconds": "165"},
+        "streamingData": {"adaptiveFormats": [
+            {"itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000, "contentLength": "5000000", "url": format!("{base}/firstmb")},
+        ]}
+    })
 }
 
 fn artist_run(name: &str) -> Value {
@@ -548,4 +581,36 @@ async fn tv_brick_solves_the_player_puzzles() {
 
     // The solved player is reused for the next track.
     assert_eq!(tv.resolve(&track).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn tv_brick_falls_back_to_an_ordinary_upload() {
+    let base = serve(Arc::default());
+    let tv = load("youtube-tv-audio.js", &base).await;
+    // No duration from search: the length comes from the player reply.
+    let mut track = Track::new(TrackId::new("youtube", "capped"), "Doodle");
+    track.artist = Some("Zachz Winner".into());
+    let streams = tv.resolve(&track).await.unwrap();
+    let StreamLocation::Http { url, .. } = &streams[0].location else {
+        panic!()
+    };
+    assert!(
+        url.contains("v=upload"),
+        "the ordinary upload is played instead: {url}"
+    );
+
+    // With the fallback off, the cut-off track is an error.
+    let mut config = serde_json::Map::new();
+    config.insert("baseUrl".into(), base.clone().into());
+    config.insert("videoFallback".into(), false.into());
+    let options = Options {
+        config,
+        domains: Some(vec!["127.0.0.1".into()]),
+        ..Options::default()
+    };
+    let strict = PluginBrick::load_file(&plugin_path("youtube-tv-audio.js"), options)
+        .await
+        .unwrap();
+    let error = strict.resolve(&track).await.unwrap_err().to_string();
+    assert!(error.contains("past the first megabyte"), "{error}");
 }
