@@ -105,3 +105,47 @@ pub fn track_to_js(track: &Track) -> Value {
         "artwork": track.artwork,
     })
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsLyricLine {
+    time_ms: Option<f64>,
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct JsLyrics {
+    #[serde(default)]
+    lines: Vec<JsLyricLine>,
+    #[serde(default)]
+    instrumental: bool,
+}
+
+/// A `lyrics` result: `null` (none found) or `{ lines: [{ timeMs?, text }], instrumental? }`.
+pub fn lyrics(value: Value, source: &str) -> Result<Option<veena_core::Lyrics>, PluginError> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let js: JsLyrics =
+        serde_json::from_value(value).map_err(|e| PluginError::InvalidResult(e.to_string()))?;
+    let lines = js
+        .lines
+        .into_iter()
+        .take(2000)
+        .map(|l| veena_core::LyricLine {
+            time: l
+                .time_ms
+                .filter(|t| t.is_finite() && *t >= 0.0)
+                .map(|t| std::time::Duration::from_millis(t as u64)),
+            text: l.text.chars().take(500).collect(),
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() && !js.instrumental {
+        return Ok(None);
+    }
+    Ok(Some(veena_core::Lyrics {
+        lines,
+        instrumental: js.instrumental,
+        source: source.to_string(),
+    }))
+}

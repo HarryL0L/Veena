@@ -26,6 +26,7 @@ const PLUGIN_STACK_BYTES: usize = 64 * 1024 * 1024;
 pub struct Slots {
     pub catalog: bool,
     pub resolver: bool,
+    pub lyrics: bool,
 }
 
 /// A request to run one exported function.
@@ -113,8 +114,9 @@ impl Runtime {
         let slots = Slots {
             catalog: exported("search")?,
             resolver: exported("resolve")?,
+            lyrics: exported("lyrics")?,
         };
-        if !slots.catalog && !slots.resolver {
+        if !slots.catalog && !slots.resolver && !slots.lyrics {
             return Err(PluginError::NothingProvided);
         }
 

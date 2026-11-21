@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import dev.veena.app.R
+import dev.veena.app.LyricsUi
 import dev.veena.app.SleepTimer
 import kotlinx.coroutines.delay
 import sh.calvin.reorderable.ReorderableItem
@@ -115,6 +116,7 @@ fun PlayerScreen(
     liked: Boolean,
     onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    lyrics: LyricsUi,
 ) {
     val currentIndex = player.current?.toInt() ?: return
     val track = player.queue.getOrNull(currentIndex) ?: return
@@ -264,6 +266,10 @@ fun PlayerScreen(
 
                 item {
                     Controls(player, playing, onToggle, onNext, onPrevious, onShuffle, onRepeat)
+                }
+
+                item {
+                    LyricsCard(lyrics, player.positionMs.toLong(), onSeek)
                 }
 
                 if (player.queue.size > 1) {

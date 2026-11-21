@@ -8,9 +8,11 @@ mod terminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use std::time::Duration;
+
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-use veena_core::{Catalog, Repeat, SourceRegistry, Track, UrlSource};
+use veena_core::{Catalog, Repeat, SourceRegistry, Track, TrackId, UrlSource};
 use veena_player::Player;
 use veena_plugin::Options;
 use veena_src_local::LocalSource;
@@ -127,6 +129,17 @@ enum Command {
     },
     /// Show installed bricks (plugins).
     Plugins,
+    /// Find a song's lyrics with the installed lyrics bricks.
+    Lyrics {
+        /// Song title.
+        title: String,
+        /// Artist name.
+        #[arg(short, long)]
+        artist: Option<String>,
+        /// Song length in seconds, to pick the right version.
+        #[arg(short, long)]
+        duration: Option<u64>,
+    },
     /// Get a track's audio link and check that it downloads, without playing.
     /// Useful for testing audio-link bricks.
     Resolve {
@@ -248,6 +261,11 @@ async fn main() -> Result<()> {
             show_plugins(plugins_dir.as_ref(), &options).await;
             Ok(())
         }
+        Command::Lyrics {
+            title,
+            artist,
+            duration,
+        } => show_lyrics(plugins_dir.as_ref(), &options, title, artist, duration).await,
         Command::Resolve { track, deep, with } => {
             let registry = registry(plugins_dir.as_ref(), &options, true).await;
             if let Some(only) = &with {
@@ -646,6 +664,58 @@ async fn update(
     Ok(())
 }
 
+async fn show_lyrics(
+    plugins_dir: Option<&PathBuf>,
+    options: &Options,
+    title: String,
+    artist: Option<String>,
+    duration: Option<u64>,
+) -> Result<()> {
+    let dir = plugins_dir.context("no plugin folder: set --plugins or VEENA_PLUGINS")?;
+    let mut track = Track::new(TrackId::new("search", "lyrics"), title);
+    track.artist = artist;
+    track.duration = duration.map(Duration::from_secs);
+    let mut bricks: Vec<_> = veena_updater::load_installed(dir, options)
+        .await?
+        .into_iter()
+        .filter_map(|(_, plugin)| plugin.ok())
+        .filter(|plugin| plugin.is_lyrics())
+        .collect();
+    if bricks.is_empty() {
+        bail!("no lyrics bricks installed");
+    }
+    bricks.sort_by_key(|b| std::cmp::Reverse(b.meta().priority));
+    for brick in &bricks {
+        match brick.lyrics(&track).await {
+            Ok(Some(lyrics)) => {
+                println!(
+                    "From {}{}:\n",
+                    lyrics.source,
+                    if lyrics.synced() { " (synced)" } else { "" }
+                );
+                if lyrics.instrumental {
+                    println!("  Instrumental: no lyrics.");
+                }
+                for line in &lyrics.lines {
+                    match line.time {
+                        Some(t) => println!(
+                            "  [{:>2}:{:02}] {}",
+                            t.as_secs() / 60,
+                            t.as_secs() % 60,
+                            line.text
+                        ),
+                        None => println!("  {}", line.text),
+                    }
+                }
+                return Ok(());
+            }
+            Ok(None) => println!("{}: no lyrics found", brick.meta().name),
+            Err(e) => println!("{}: {e}", brick.meta().name),
+        }
+    }
+    bail!("no lyrics found")
+}
+
 async fn show_plugins(plugins_dir: Option<&PathBuf>, options: &Options) {
     let Some(dir) = plugins_dir else {
         println!("No plugin folder: set --plugins or VEENA_PLUGINS.");
@@ -670,7 +740,8 @@ async fn show_plugins(plugins_dir: Option<&PathBuf>, options: &Options) {
                 let slots = match (plugin.is_catalog(), plugin.is_resolver()) {
                     (true, true) => "search + audio links",
                     (true, false) => "search",
-                    _ => "audio links",
+                    (false, true) => "audio links",
+                    (false, false) => "lyrics",
                 };
                 println!("  {:<16} {} {}", meta.id, meta.name, meta.version);
                 println!(

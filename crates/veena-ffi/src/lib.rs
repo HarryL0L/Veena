@@ -75,6 +75,23 @@ pub struct PlayerState {
     pub repeat: RepeatMode,
 }
 
+/// One line of lyrics; `time_ms` is when it is sung, for synced lyrics.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct LyricLineInfo {
+    pub time_ms: Option<u64>,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct LyricsInfo {
+    pub lines: Vec<LyricLineInfo>,
+    /// Every line has a time, so the lyrics can follow the song.
+    pub synced: bool,
+    pub instrumental: bool,
+    /// The brick that found them.
+    pub source: String,
+}
+
 /// A playlist as the library screen lists it.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct PlaylistInfo {
@@ -135,6 +152,8 @@ pub struct Veena {
     sources: Mutex<std::collections::HashMap<(String, String), String>>,
     /// Liked songs, history and playlists.
     library: Arc<veena_library::Library>,
+    lyric_bricks: Mutex<Vec<Arc<veena_plugin::PluginBrick>>>,
+    lyrics_cache: Mutex<std::collections::HashMap<(String, String), Option<LyricsInfo>>>,
 }
 
 #[uniffi::export]
@@ -170,6 +189,8 @@ impl Veena {
             plugins: Mutex::default(),
             sources: Mutex::default(),
             library,
+            lyric_bricks: Mutex::default(),
+            lyrics_cache: Mutex::default(),
         });
         veena.reload_plugins();
         veena.record_history();
@@ -183,6 +204,7 @@ impl Veena {
             &Options::default(),
         ));
         let mut infos = Vec::new();
+        let mut lyrics = Vec::new();
         for (path, plugin) in loaded.unwrap_or_default() {
             match plugin {
                 Ok(plugin) => {
@@ -195,7 +217,11 @@ impl Veena {
                         audio_links: plugin.is_resolver(),
                         error: None,
                     });
-                    Arc::new(plugin).install(&self.registry);
+                    let plugin = Arc::new(plugin);
+                    if plugin.is_lyrics() {
+                        lyrics.push(plugin.clone());
+                    }
+                    plugin.install(&self.registry);
                 }
                 Err(e) => infos.push(PluginInfo {
                     id: path
@@ -212,6 +238,48 @@ impl Veena {
             }
         }
         *self.plugins.lock().unwrap() = infos;
+        lyrics.sort_by_key(|b| std::cmp::Reverse(b.meta().priority));
+        *self.lyric_bricks.lock().unwrap() = lyrics;
+    }
+
+    /// Lyrics for a song from the lyrics bricks, best first; `None` if no
+    /// brick found any. Blocks while searching; results are remembered.
+    pub fn lyrics(&self, track: TrackInfo) -> Option<LyricsInfo> {
+        let key = (track.kind.clone(), track.id.clone());
+        if let Some(found) = self.lyrics_cache.lock().unwrap().get(&key) {
+            return found.clone();
+        }
+        let bricks = self.lyric_bricks.lock().unwrap().clone();
+        let track = from_info(&track);
+        let mut found = None;
+        for brick in bricks {
+            match self.runtime.block_on(brick.lyrics(&track)) {
+                Ok(Some(lyrics)) => {
+                    found = Some(LyricsInfo {
+                        synced: lyrics.synced(),
+                        instrumental: lyrics.instrumental,
+                        source: lyrics.source,
+                        lines: lyrics
+                            .lines
+                            .into_iter()
+                            .map(|l| LyricLineInfo {
+                                time_ms: l.time.map(|t| t.as_millis() as u64),
+                                text: l.text,
+                            })
+                            .collect(),
+                    });
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => log::info!("lyrics from {}: {e}", brick.meta().name),
+            }
+        }
+        let mut cache = self.lyrics_cache.lock().unwrap();
+        if cache.len() > 200 {
+            cache.clear();
+        }
+        cache.insert(key, found.clone());
+        found
     }
 
     pub fn plugins(&self) -> Vec<PluginInfo> {

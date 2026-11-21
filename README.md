@@ -66,6 +66,9 @@ new app release.
 - Background playback with lock screen, notification and headphone controls.
 - Full player with large artwork, seek bar, shuffle, repeat and queue.
 - Pauses for calls and when headphones are unplugged.
+- Colours taken from each song's artwork; swipe covers to change songs.
+- Home, Search and Library tabs: recently played, liked songs, playlists.
+- Synced lyrics, queue reordering, sleep timer.
 
 ### Linux
 - Native desktop app styled to match.
@@ -181,7 +184,9 @@ Planned: a Slint desktop app.
 - [x] Background playback, lock screen and headphone controls
 - [x] Official YouTube Music tracks on Android (proof-of-origin tokens)
 - [ ] Linux app
-- [ ] Offline downloads, lyrics, gapless playback
+- [x] Liked songs, recently played and playlists
+- [x] Synced lyrics (LRCLIB brick)
+- [ ] Offline downloads, gapless playback
 
 ---
 

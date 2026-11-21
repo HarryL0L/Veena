@@ -10,9 +10,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.veena_ffi.LyricsInfo
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
 import uniffi.veena_ffi.RepeatMode
@@ -20,6 +24,14 @@ import uniffi.veena_ffi.appLog
 
 /** A short message for the snackbar; errors offer a way to the logs. */
 data class UiMessage(val text: String, val error: Boolean = false)
+
+/** Lyrics for the current song, as the player screen shows them. */
+sealed interface LyricsUi {
+    data object None : LyricsUi
+    data object Loading : LyricsUi
+    data object NotFound : LyricsUi
+    data class Found(val lyrics: LyricsInfo) : LyricsUi
+}
 
 /** The two kinds of search results the app shows separately. */
 enum class Section(val label: String) {
@@ -54,7 +66,25 @@ class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub) : Vie
     private val _messages = MutableStateFlow<UiMessage?>(null)
     val messages: StateFlow<UiMessage?> = _messages.asStateFlow()
 
+    private val _lyrics = MutableStateFlow<LyricsUi>(LyricsUi.None)
+    /** Lyrics for the song playing now, looked up when it changes. */
+    val lyrics: StateFlow<LyricsUi> = _lyrics.asStateFlow()
+
     init {
+        viewModelScope.launch {
+            hub.state
+                .map { s -> s.current?.let { s.queue.getOrNull(it.toInt()) } }
+                .distinctUntilChanged { a, b -> a?.kind == b?.kind && a?.id == b?.id }
+                .collectLatest { track ->
+                    if (track == null) {
+                        _lyrics.value = LyricsUi.None
+                        return@collectLatest
+                    }
+                    _lyrics.value = LyricsUi.Loading
+                    val found = withContext(Dispatchers.IO) { runCatching { hub.veena.lyrics(track) }.getOrNull() }
+                    _lyrics.value = found?.let { LyricsUi.Found(it) } ?: LyricsUi.NotFound
+                }
+        }
         viewModelScope.launch {
             hub.errors.collect { _messages.value = UiMessage(friendly(it), error = true) }
         }

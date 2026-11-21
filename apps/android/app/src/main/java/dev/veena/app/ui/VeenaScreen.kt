@@ -88,6 +88,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
     val message by viewModel.messages.collectAsStateWithLifecycle()
     val sleep by viewModel.sleep.collectAsStateWithLifecycle()
     val liked by viewModel.library.liked.collectAsStateWithLifecycle()
+    val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
     val snackbars = remember { SnackbarHostState() }
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -209,6 +210,7 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
             liked = current != null && actions.isLiked(current),
             onToggleLike = { current?.let(viewModel::toggleLike) },
             onAddToPlaylist = { addingToPlaylist = current },
+            lyrics = lyrics,
         )
     }
 }

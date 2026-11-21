@@ -60,6 +60,20 @@ impl PluginBrick {
         self.slots.resolver
     }
 
+    /// Whether the plugin finds lyrics (exports `lyrics`).
+    pub fn is_lyrics(&self) -> bool {
+        self.slots.lyrics
+    }
+
+    /// Lyrics for a track, or `None` if the brick found none.
+    pub async fn lyrics(&self, track: &Track) -> Result<Option<veena_core::Lyrics>> {
+        let value = self
+            .call("lyrics", vec![convert::track_to_js(track)])
+            .await
+            .map_err(|e| self.error(e))?;
+        convert::lyrics(value, &self.meta.name).map_err(|e| self.error(e))
+    }
+
     /// Domains the plugin may contact.
     pub fn domains(&self) -> &[String] {
         self.options
