@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
 import uniffi.veena_ffi.RepeatMode
+import uniffi.veena_ffi.appLog
 
 /** The two kinds of search results the app shows separately. */
 enum class Section(val label: String) {
@@ -65,7 +66,10 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
         _search.update { it.copy(searching = true) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { hub.veena.search(query) } }
-            result.onFailure { _messages.value = it.message ?: "Search failed" }
+            result.onFailure {
+                runCatching { appLog("[search] ${it.message}") }
+                _messages.value = it.message ?: "Search failed"
+            }
             _search.update { it.copy(searching = false, results = result.getOrDefault(it.results)) }
         }
     }

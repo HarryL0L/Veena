@@ -3,6 +3,7 @@ package dev.veena.app
 import android.app.Application
 import android.util.Log
 import java.io.File
+import kotlin.concurrent.thread
 import uniffi.veena_ffi.Veena
 import uniffi.veena_ffi.setTokenMinter
 
@@ -17,8 +18,10 @@ class VeenaApp : Application() {
         super.onCreate()
         installBundledPlugins()
         // Lets YouTube bricks get proof-of-origin tokens from a hidden web view.
-        setTokenMinter(PoTokenMinter(this))
+        val minter = PoTokenMinter(this)
+        setTokenMinter(minter)
         veena = Veena(filesDir.absolutePath)
+        thread(name = "token-warm-up") { minter.warmUp() }
         hub = PlayerHub(veena)
         BrickUpdateWorker.schedule(this)
     }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import uniffi.veena_ffi.PlayerListener
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.Veena
+import uniffi.veena_ffi.appLog
 
 /**
  * The one place that listens to the Rust player. The screen and the media
@@ -35,6 +36,7 @@ class PlayerHub(val veena: Veena) {
             }
 
             override fun onError(message: String) {
+                runCatching { appLog("[player] $message") }
                 _errors.tryEmit(message)
             }
         })

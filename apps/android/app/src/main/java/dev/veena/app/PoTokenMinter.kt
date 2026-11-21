@@ -24,6 +24,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import uniffi.veena_ffi.TokenMinter
+import uniffi.veena_ffi.appLog
 
 /**
  * Makes YouTube "proof of origin" tokens, which YouTube now asks for before
@@ -52,7 +53,7 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
                         JSONTokener(result).nextValue() as? String
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "could not make a token: ${e.message}")
+                    log("could not make a token: ${e.message}")
                     session?.close()
                     session = null
                     null
@@ -61,8 +62,14 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
         }
     }
 
+    /** Get the token maker ready ahead of the first song. Call off the main thread. */
+    fun warmUp() {
+        mint("warm-up")
+    }
+
     private suspend fun newSession(): Session {
         session?.close()
+        log("starting the token maker")
         val started = SystemClock.elapsedRealtime()
         val page = withContext(Dispatchers.Main) { Session.open(context) }
         try {
@@ -80,7 +87,7 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
             page.call("veenaPot.setIntegrity(${JSONArray(bytes.map { it.toInt() and 0xff })})")
             // Renew ten minutes before YouTube's stated expiry.
             page.expiresAt = SystemClock.elapsedRealtime() + (ttlSeconds - 600).coerceAtLeast(60) * 1000
-            Log.i(TAG, "ready in ${SystemClock.elapsedRealtime() - started} ms; valid for $ttlSeconds s")
+            log("token maker ready in ${SystemClock.elapsedRealtime() - started} ms; valid for $ttlSeconds s")
             return page
         } catch (e: Exception) {
             page.close()
@@ -88,8 +95,11 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
         }
     }
 
-    /** One hidden web view with BotGuard loaded. */
-    private class Session private constructor(private val webView: WebView) {
+    /**
+     * One hidden web view with BotGuard loaded. Public, because the web view
+     * calls [done] and [fail] by reflection.
+     */
+    class Session private constructor(private val webView: WebView) {
         private val pending = ConcurrentHashMap<Int, CompletableDeferred<String>>()
         private val ids = AtomicInteger()
         var expiresAt = Long.MAX_VALUE
@@ -165,6 +175,11 @@ class PoTokenMinter(private val context: Context) : TokenMinter {
 
     companion object {
         private const val TAG = "veena-pot"
+
+        private fun log(message: String) {
+            Log.i(TAG, message)
+            runCatching { appLog("[tokens] $message") }
+        }
         private const val BRIDGE = "VeenaPotBridge"
         private const val REQUEST_KEY = "O43z0dpjhgX20SCx4KAo"
         private const val API_KEY = "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw"

@@ -416,13 +416,86 @@ fn from_info(info: &TrackInfo) -> Track {
     }
 }
 
-fn init_logging() {
+/// Most recent log lines kept for the app's logs screen.
+const LOG_LINES: usize = 500;
+static LOGS: Mutex<std::collections::VecDeque<String>> =
+    Mutex::new(std::collections::VecDeque::new());
+
+fn remember_log(line: String) {
+    let mut logs = LOGS.lock().unwrap_or_else(|e| e.into_inner());
+    if logs.len() >= LOG_LINES {
+        logs.pop_front();
+    }
+    logs.push_back(line);
+}
+
+/// Sends Veena's log messages to the system log (on Android) and keeps
+/// the latest ones for the logs screen.
+struct AppLogger {
     #[cfg(target_os = "android")]
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Info)
-            .with_tag("veena"),
-    );
+    system: android_logger::AndroidLogger,
+}
+
+impl log::Log for AppLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info && metadata.target().starts_with("veena")
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        remember_log(format!(
+            "{:02}:{:02}:{:02} {} {}",
+            secs / 3600 % 24,
+            secs / 60 % 60,
+            secs % 60,
+            record.level(),
+            record.args()
+        ));
+        #[cfg(target_os = "android")]
+        self.system.log(record);
+    }
+
+    fn flush(&self) {}
+}
+
+fn init_logging() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let logger = AppLogger {
+            #[cfg(target_os = "android")]
+            system: android_logger::AndroidLogger::new(
+                android_logger::Config::default()
+                    .with_max_level(log::LevelFilter::Info)
+                    .with_tag("veena"),
+            ),
+        };
+        if log::set_boxed_logger(Box::new(logger)).is_ok() {
+            log::set_max_level(log::LevelFilter::Info);
+        }
+    });
+}
+
+/// The latest log lines (times in UTC), oldest first.
+#[uniffi::export]
+pub fn recent_logs() -> Vec<String> {
+    LOGS.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .cloned()
+        .collect()
+}
+
+/// Add a line from the app itself to the logs.
+#[uniffi::export]
+pub fn app_log(message: String) {
+    init_logging();
+    log::info!(target: "veena_app", "{message}");
 }
 
 #[cfg(test)]

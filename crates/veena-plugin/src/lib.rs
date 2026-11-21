@@ -141,7 +141,8 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            call_timeout: Duration::from_secs(30),
+            // Phones can take a while to run YouTube's player code the first time.
+            call_timeout: Duration::from_secs(45),
             loop_iterations: 10_000_000,
             recursion: 400,
             requests_per_call: 32,

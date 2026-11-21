@@ -35,7 +35,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,10 +74,12 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
     val message by viewModel.messages.collectAsStateWithLifecycle()
     val snackbars = remember { SnackbarHostState() }
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var showLogs by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(message) {
         message?.let {
-            snackbars.showSnackbar(it)
+            val result = snackbars.showSnackbar(it, actionLabel = "Details", duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) showLogs = true
             viewModel.messageShown()
         }
     }
@@ -90,6 +94,11 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Search songs") },
                     leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
+                    trailingIcon = {
+                        IconButton(onClick = { showLogs = true }) {
+                            Icon(painterResource(R.drawable.ic_bug), contentDescription = "Logs")
+                        }
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(28.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -142,6 +151,8 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
             }
         }
     }
+
+    if (showLogs) LogsSheet(onDismiss = { showLogs = false })
 
     AnimatedVisibility(
         visible = expanded && player.current != null,
