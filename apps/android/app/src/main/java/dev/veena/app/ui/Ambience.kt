@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.material3.MaterialTheme
@@ -159,8 +160,10 @@ fun rememberAmbience(settings: SettingsState): Ambience {
 }
 
 /**
- * Seconds since the scene appeared, ticking about 30 times a second. Frozen
- * when the system asks for no animations or Battery Saver is on.
+ * Seconds since the scene appeared, ticking about 24 times a second (plenty
+ * for slow drifting). It starts a moment after the screen appears, so it
+ * never competes with the app starting up. Frozen when the system asks for
+ * no animations or Battery Saver is on.
  */
 @Composable
 private fun sceneClock(): State<Float> {
@@ -169,11 +172,12 @@ private fun sceneClock(): State<Float> {
     val still = remember { prefersStill(context) }
     if (!still) {
         LaunchedEffect(Unit) {
+            delay(2_500)
             val start = withFrameNanos { it }
             var last = 0L
             while (true) {
                 withFrameNanos { now ->
-                    if (now - last >= 33_000_000L) {
+                    if (now - last >= 41_000_000L) {
                         last = now
                         time.floatValue = STILL_TIME + (now - start) / 1e9f
                     }
@@ -215,7 +219,7 @@ fun AmbientScene(ambience: Ambience, modifier: Modifier = Modifier, fadeBottom: 
         drawSky(ambience.hour, tone)
         val night = nightness(ambience.hour)
         drawStars(seeds, t, night)
-        drawSunAndMoon(ambience.hour, t, tone)
+        drawSunAndMoon(seeds, ambience.hour, t)
         drawClouds(seeds, t, ambience.hour, night, dark)
         when (ambience.season) {
             Season.WINTER -> drawSnow(seeds, t, dark)
@@ -254,6 +258,24 @@ private class Seeds {
     private val r = Random(1729)
     val stars = Array(48) { floatArrayOf(r.nextFloat(), r.nextFloat() * 0.72f, 0.7f + r.nextFloat() * 1.4f, 0.6f + r.nextFloat() * 2f, r.nextFloat() * 6.28f) }
     val particles = Array(36) { FloatArray(6) { r.nextFloat() } }
+    /** Shapes drawn many times, made once at unit size and scaled when drawn. */
+    val leaf = Path().apply {
+        moveTo(-0.5f, 0f)
+        quadraticTo(0f, -0.45f, 0.5f, 0f)
+        quadraticTo(0f, 0.45f, -0.5f, 0f)
+        close()
+    }
+    val heart = Path().apply {
+        moveTo(0f, 0.35f)
+        cubicTo(-0.6f, -0.05f, -0.35f, -0.55f, 0f, -0.22f)
+        cubicTo(0.35f, -0.55f, 0.6f, -0.05f, 0f, 0.35f)
+        close()
+    }
+    val crescent = Path().apply {
+        val disc = Path().apply { addOval(androidx.compose.ui.geometry.Rect(Offset.Zero, 1f)) }
+        val bite = Path().apply { addOval(androidx.compose.ui.geometry.Rect(Offset(0.42f, -0.28f), 0.92f)) }
+        op(disc, bite, PathOperation.Difference)
+    }
     val clouds = Array(4) { floatArrayOf(r.nextFloat(), 0.12f + r.nextFloat() * 0.3f, 0.7f + r.nextFloat() * 0.6f, 4f + r.nextFloat() * 6f) }
 }
 
@@ -328,7 +350,7 @@ private fun DrawScope.drawStars(seeds: Seeds, t: Float, night: Float) {
 private fun DrawScope.arc(f: Float): Offset =
     Offset(size.width * (0.1f + 0.8f * f), size.height * (0.7f - 0.55f * sin(PI.toFloat() * f)))
 
-private fun DrawScope.drawSunAndMoon(hour: Float, t: Float, tone: Tone) {
+private fun DrawScope.drawSunAndMoon(seeds: Seeds, hour: Float, t: Float) {
     // The sun: from about 5:30 to 19:30.
     if (hour in 5.4f..19.6f) {
         val f = ((hour - 5.6f) / 13.8f).coerceIn(0f, 1f)
@@ -350,10 +372,10 @@ private fun DrawScope.drawSunAndMoon(hour: Float, t: Float, tone: Tone) {
         val r = 14.dp.toPx()
         val glow = 56.dp.toPx()
         drawCircle(Brush.radialGradient(listOf(Color(0x55E8E6FF).copy(alpha = 0.33f * fade), Color.Transparent), c, glow), glow, c)
-        val disc = Path().apply { addOval(androidx.compose.ui.geometry.Rect(c, r)) }
-        val bite = Path().apply { addOval(androidx.compose.ui.geometry.Rect(c + Offset(r * 0.42f, -r * 0.28f), r * 0.92f)) }
-        val crescent = Path().apply { op(disc, bite, PathOperation.Difference) }
-        drawPath(crescent, Color(0xFFF6F2DE).copy(alpha = fade))
+        withTransform({
+            translate(c.x, c.y)
+            scale(r, r, Offset.Zero)
+        }) { drawPath(seeds.crescent, Color(0xFFF6F2DE).copy(alpha = fade)) }
     }
 }
 
@@ -395,18 +417,20 @@ private fun DrawScope.falling(p: FloatArray, t: Float, speed: Float, sway: Float
 private fun DrawScope.drawSnow(seeds: Seeds, t: Float, dark: Boolean) {
     val color = if (dark) Color.White else Color(0xFFF4F8FF)
     val edge = Color(0xFF7D8FB3).copy(alpha = if (dark) 0f else 0.35f)
+    val ring = Stroke(0.6.dp.toPx())
     for (p in seeds.particles) {
         val c = falling(p, t, speed = 22f, sway = 10f)
         val r = (1.3f + 2.4f * p[1]).dp.toPx()
         drawCircle(color.copy(alpha = 0.55f + 0.4f * p[1]), r, c)
-        if (!dark) drawCircle(edge, r, c, style = Stroke(0.6.dp.toPx()))
+        if (!dark) drawCircle(edge, r, c, style = ring)
     }
 }
 
 private val PETALS = listOf(Color(0xFFF7B6CF), Color(0xFFFFD6E5), Color(0xFFF48FB1), Color(0xFFFFE4EE))
 
 private fun DrawScope.drawPetals(seeds: Seeds, t: Float) {
-    seeds.particles.take(20).forEachIndexed { i, p ->
+    for (i in 0 until 20) {
+        val p = seeds.particles[i]
         val c = falling(p, t, speed = 16f, sway = 14f, drift = 10f)
         val s = 0.7f + 0.6f * p[1]
         val w = 7.dp.toPx() * s
@@ -420,19 +444,18 @@ private fun DrawScope.drawPetals(seeds: Seeds, t: Float) {
 private val LEAVES = listOf(Color(0xFFE07A3F), Color(0xFFC8553D), Color(0xFFE9A23B), Color(0xFFA0522D))
 
 private fun DrawScope.drawLeaves(seeds: Seeds, t: Float) {
-    seeds.particles.take(16).forEachIndexed { i, p ->
+    for (i in 0 until 16) {
+        val p = seeds.particles[i]
         val c = falling(p, t, speed = 18f, sway = 18f, drift = -6f)
         val len = (8f + 5f * p[1]).dp.toPx()
         val angle = sin(t * (0.8f + p[4]) + p[5] * 6.28f) * 70f + p[5] * 360f
+        val color = LEAVES[i % LEAVES.size]
+        withTransform({
+            translate(c.x, c.y)
+            rotate(angle, Offset.Zero)
+            scale(len, len, Offset.Zero)
+        }) { drawPath(seeds.leaf, color.copy(alpha = 0.92f)) }
         rotate(angle, c) {
-            val leaf = Path().apply {
-                moveTo(c.x - len / 2, c.y)
-                quadraticTo(c.x, c.y - len * 0.45f, c.x + len / 2, c.y)
-                quadraticTo(c.x, c.y + len * 0.45f, c.x - len / 2, c.y)
-                close()
-            }
-            val color = LEAVES[i % LEAVES.size]
-            drawPath(leaf, color.copy(alpha = 0.92f))
             drawLine(lerp(color, Color.Black, 0.3f), Offset(c.x - len / 2, c.y), Offset(c.x + len * 0.6f, c.y), strokeWidth = 0.8.dp.toPx())
         }
     }
@@ -440,7 +463,8 @@ private fun DrawScope.drawLeaves(seeds: Seeds, t: Float) {
 
 /** Summer: light motes drifting up by day, fireflies by night. */
 private fun DrawScope.drawSummer(seeds: Seeds, t: Float, night: Float) {
-    seeds.particles.take(18).forEach { p ->
+    for (i in 0 until 18) {
+        val p = seeds.particles[i]
         if (night < 0.98f) {
             // Rising motes of light.
             val c = falling(p, -t, speed = 7f, sway = 8f)
@@ -522,16 +546,14 @@ private fun DrawScope.drawFireworks(t: Float, strength: Float, warm: Boolean) {
 
 /** Valentine's Day: hearts floating up. */
 private fun DrawScope.drawHearts(seeds: Seeds, t: Float) {
-    seeds.particles.takeLast(12).forEachIndexed { i, p ->
+    for (i in 0 until 12) {
+        val p = seeds.particles[seeds.particles.size - 12 + i]
         val c = falling(p, -t, speed = 13f, sway = 12f)
         val s = (9f + 6f * p[1]).dp.toPx()
-        val heart = Path().apply {
-            moveTo(c.x, c.y + s * 0.35f)
-            cubicTo(c.x - s * 0.6f, c.y - s * 0.05f, c.x - s * 0.35f, c.y - s * 0.55f, c.x, c.y - s * 0.22f)
-            cubicTo(c.x + s * 0.35f, c.y - s * 0.55f, c.x + s * 0.6f, c.y - s * 0.05f, c.x, c.y + s * 0.35f)
-            close()
-        }
         val color = if (i % 3 == 0) Color(0xFFE57373) else Color(0xFFF48FB1)
-        drawPath(heart, color.copy(alpha = 0.8f))
+        withTransform({
+            translate(c.x, c.y)
+            scale(s, s, Offset.Zero)
+        }) { drawPath(seeds.heart, color.copy(alpha = 0.8f)) }
     }
 }
