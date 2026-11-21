@@ -5,12 +5,12 @@ use std::path::Path;
 use rodio::Decoder;
 use veena_core::{Stream, StreamLocation};
 
-use crate::{AudioError, HttpReader};
+use crate::{AudioError, HttpReader, PrefetchReader};
 
 /// Byte source for the decoder: a local file or an HTTP stream.
 pub(crate) enum Input {
     File(File),
-    Http(HttpReader),
+    Http(PrefetchReader),
 }
 
 impl Read for Input {
@@ -41,7 +41,7 @@ pub(crate) fn open(stream: &Stream) -> Result<Decoder<Input>, AudioError> {
             (Input::File(file), Some(len), true, extension(path), None)
         }
         StreamLocation::Http { url, headers } => {
-            let reader = HttpReader::open(url, headers)?;
+            let reader = PrefetchReader::new(HttpReader::open(url, headers)?);
             let path = url.split(['?', '#']).next().unwrap_or(url);
             let (len, seekable) = (reader.byte_len(), reader.is_seekable());
             let mime = reader.content_type().map(str::to_owned);

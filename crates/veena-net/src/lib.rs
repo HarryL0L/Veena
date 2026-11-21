@@ -53,23 +53,26 @@ fn root_certs() -> RootCerts {
 /// certificates are not included, matching Android's default for apps.
 #[cfg(target_os = "android")]
 fn system_store() -> Option<Vec<ureq::tls::Certificate<'static>>> {
-    ["/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts"]
-        .iter()
-        .find_map(|dir| {
-            let certs: Vec<_> = std::fs::read_dir(dir)
-                .ok()?
-                .filter_map(|entry| std::fs::read(entry.ok()?.path()).ok())
-                .flat_map(|pem| {
-                    ureq::tls::parse_pem(&pem)
-                        .filter_map(|item| match item {
-                            Ok(PemItem::Certificate(cert)) => Some(cert),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-            (!certs.is_empty()).then_some(certs)
-        })
+    [
+        "/apex/com.android.conscrypt/cacerts",
+        "/system/etc/security/cacerts",
+    ]
+    .iter()
+    .find_map(|dir| {
+        let certs: Vec<_> = std::fs::read_dir(dir)
+            .ok()?
+            .filter_map(|entry| std::fs::read(entry.ok()?.path()).ok())
+            .flat_map(|pem| {
+                ureq::tls::parse_pem(&pem)
+                    .filter_map(|item| match item {
+                        Ok(PemItem::Certificate(cert)) => Some(cert),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        (!certs.is_empty()).then_some(certs)
+    })
 }
 
 #[cfg(not(target_os = "android"))]

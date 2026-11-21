@@ -256,14 +256,14 @@ impl Seek for HttpReader {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
     use std::thread;
 
     /// A tiny HTTP server serving `data`, with or without range support.
-    fn serve(data: Vec<u8>, ranges: bool) -> String {
+    pub(crate) fn serve(data: Vec<u8>, ranges: bool) -> String {
         serve_with_limit(data, ranges, usize::MAX)
     }
 
@@ -320,7 +320,7 @@ mod tests {
         format!("http://{addr}/file.wav")
     }
 
-    fn data() -> Vec<u8> {
+    pub(crate) fn data() -> Vec<u8> {
         (0..1_000_000u32).map(|i| (i % 251) as u8).collect()
     }
 

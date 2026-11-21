@@ -7,9 +7,11 @@
 mod decode;
 mod engine;
 mod http;
+mod prefetch;
 
 pub use engine::{AudioEngine, AudioEvent, PlaybackState};
 pub use http::HttpReader;
+pub use prefetch::PrefetchReader;
 
 /// Errors from the audio engine.
 #[derive(Debug, thiserror::Error)]
