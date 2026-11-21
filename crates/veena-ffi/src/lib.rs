@@ -15,7 +15,9 @@ use veena_plugin::Options;
 
 uniffi::setup_scaffolding!();
 
+/// Errors arrive in Kotlin as `VeenaException` with this text as `message`.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum VeenaError {
     #[error("{message}")]
     Failed { message: String },
