@@ -17,11 +17,28 @@ import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
 import uniffi.veena_ffi.RepeatMode
 
+/** The two kinds of search results the app shows separately. */
+enum class Section(val label: String) {
+    MUSIC("Music"),
+    VIDEOS("Videos"),
+}
+
 data class SearchUiState(
     val query: String = "",
     val results: List<TrackInfo> = emptyList(),
     val searching: Boolean = false,
-)
+    val section: Section = Section.MUSIC,
+) {
+    /** The results in the chosen section. */
+    val shown: List<TrackInfo> get() = results.filter { sectionOf(it) == section }
+
+    companion object {
+        /** Name of the video search brick; everything else counts as music. */
+        private const val VIDEO_SOURCE = "YouTube videos"
+
+        fun sectionOf(track: TrackInfo) = if (track.source == VIDEO_SOURCE) Section.VIDEOS else Section.MUSIC
+    }
+}
 
 class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
     private val _search = MutableStateFlow(SearchUiState())
@@ -40,6 +57,7 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
     }
 
     fun onQueryChange(query: String) = _search.update { it.copy(query = query) }
+    fun onSectionChange(section: Section) = _search.update { it.copy(section = section) }
 
     fun search() {
         val query = _search.value.query.trim()
@@ -52,8 +70,9 @@ class PlayerViewModel(private val hub: PlayerHub) : ViewModel() {
         }
     }
 
+    /** Play a result, queueing the rest of its section after it. */
     fun play(index: Int) {
-        val tracks = _search.value.results
+        val tracks = _search.value.shown
         hub.send { play(tracks, index.toUInt()) }
     }
 

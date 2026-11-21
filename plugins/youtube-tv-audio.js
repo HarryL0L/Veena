@@ -12,12 +12,16 @@
 // `X.set("alr","yes")` statement it contains, then let it unscramble a
 // test URL. Older function searches remain as a fallback.
 //
+// When the app can make proof-of-origin tokens (Android, through a hidden
+// web view), the mobile website's links are used first: with tokens they
+// play official music tracks in full.
+//
 // Only AAC (audio/mp4) is returned: Veena can't decode Opus yet.
 
 export const meta = {
   id: "youtube-tv-audio",
   name: "YouTube audio (TV)",
-  version: "1.1.0",
+  version: "1.2.0",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com", "googlevideo.com"],
@@ -54,12 +58,26 @@ const QUEST = {
 };
 
 /**
+ * The mobile website. Its links need a proof-of-origin token, which only
+ * the app can make (Android does it with a hidden web view). Used first
+ * when a token is available, because it plays official music tracks.
+ */
+const MWEB = {
+  name: "MWEB",
+  id: 2,
+  version: "2.20251120.01.00",
+  userAgent:
+    "Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)",
+  needsToken: true,
+};
+
+/**
  * App types to try, in order; replaceable through `veena.config.tvClients`.
  * TV ("The page needs to be reloaded") and QUEST (cut off after 1 MB) fail
  * as of November 2026, so by default only TV_SIMPLY is used; they are kept
  * for when YouTube changes again.
  */
-const CLIENTS = veena.config.tvClients ?? [TV_SIMPLY];
+const CLIENTS = veena.config.tvClients ?? [MWEB, TV_SIMPLY];
 /** Links without a proof-of-origin token stop working after this point. */
 const TOKEN_FREE_LIMIT = 1024 * 1024;
 
@@ -95,10 +113,13 @@ async function streamsForVideo(videoId, solved, problems) {
   for (const client of CLIENTS) {
     let label = `${client.name} ${client.version}`;
     try {
+      const token = client.needsToken ? await tokens(videoId) : undefined;
+      if (client.needsToken && !token) continue;
       const current = await withCurrentVersion(client);
       label = `${current.name} ${current.version}`;
-      const streams = await streamsFrom(current, videoId, solved);
+      const streams = await streamsFrom(current, videoId, solved, token);
       // `--config probe=false` skips the download check, for diagnosis.
+      if (veena.config.logUrls) veena.log(`${videoId} ${label}: ${streams[0].url}`);
       const failure = veena.config.probe === false ? undefined : await probe(streams[0]);
       if (failure) throw new Error(`links refused when downloading ${failure}`);
       veena.log(`${label}: links work for ${videoId}`);
@@ -159,8 +180,9 @@ async function similarVideos(track) {
   return videos.slice(0, veena.config.videoFallbackTries ?? 3);
 }
 
-async function streamsFrom(client, videoId, solved) {
-  const visitor = await visitorData();
+async function streamsFrom(client, videoId, solved, token) {
+  // A token is tied to the visitor id it was made for.
+  const visitor = token?.visitorData ?? (await visitorData());
   const res = await veena.http.fetch(`${BASE}/youtubei/v1/player?prettyPrint=false`, {
     method: "POST",
     headers: {
@@ -190,6 +212,7 @@ async function streamsFrom(client, videoId, solved) {
       },
       contentCheckOk: true,
       racyCheckOk: true,
+      ...(token?.player ? { serviceIntegrityDimensions: { poToken: token.player } } : {}),
     }),
   });
   if (!res.ok) throw new Error(`player request failed with status ${res.status}`);
@@ -206,7 +229,7 @@ async function streamsFrom(client, videoId, solved) {
     .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
   if (formats.length === 0) throw new Error("no AAC audio offered");
   return formats.map((f) => ({
-    url: unscramble(f, solved),
+    url: unscramble(f, solved) + (token ? `&pot=${encodeURIComponent(token.streaming)}` : ""),
     mime: "audio/mp4",
     bitrate: f.averageBitrate ?? f.bitrate,
     size: Number(f.contentLength) || undefined,
@@ -717,6 +740,47 @@ function debugGrep(code, pattern, context) {
     const around = code.slice(Math.max(0, m.index - context), m.index + m[0].length + context);
     veena.log(`@${m.index}: ${around.replace(/\s+/g, " ")}`);
   }
+}
+
+/**
+ * Proof-of-origin tokens for a video, made by the app (`veena.poToken`),
+ * or taken from `veena.config.poToken` for testing. `streaming` is made for
+ * a visitor id and goes on links; `player` is made for the video id.
+ * Returns undefined when this app cannot make tokens.
+ */
+async function tokens(videoId) {
+  if (veena.config.poToken) return veena.config.poToken;
+  if (typeof veena.poToken !== "function" || veena.config.tokens === false) return undefined;
+  const cached = veena.cache.get("tokens");
+  if (cached === "none") return undefined;
+  let session = cached ? JSON.parse(cached) : undefined;
+  if (!session) {
+    const visitorData = await freshVisitorData();
+    const streaming = visitorData && veena.poToken(visitorData);
+    if (!streaming) {
+      veena.log("this app can't make proof-of-origin tokens; using the TV app only");
+      veena.cache.set("tokens", "none", 600);
+      return undefined;
+    }
+    session = { visitorData, streaming };
+    // Tokens last about 12 hours; renew well before then.
+    veena.cache.set("tokens", JSON.stringify(session), 6 * 3600);
+  }
+  const player = veena.poToken(videoId);
+  return player ? { ...session, player } : undefined;
+}
+
+/** A new anonymous visitor id, for tokens. */
+async function freshVisitorData() {
+  const home = await homePage();
+  const res = await veena.http.fetch(`${BASE}/youtubei/v1/visitor_id?prettyPrint=false`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: home.webVersion, hl: "en", gl: veena.config.region ?? "US" } } }),
+  });
+  const visitor = res.ok ? res.json().responseContext?.visitorData : undefined;
+  if (!visitor) veena.log(`could not get a visitor id (status ${res.status})`);
+  return visitor;
 }
 
 /** YouTube's anonymous visitor id and current web app version, cached. */

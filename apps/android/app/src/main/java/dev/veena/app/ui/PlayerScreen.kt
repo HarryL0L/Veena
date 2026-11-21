@@ -190,6 +190,7 @@ fun PlayerScreen(
                     ListItem(
                         selected = isCurrent,
                         onClick = { onPlayQueueItem(index) },
+                        modifier = Modifier.padding(horizontal = 8.dp),
                         supportingContent = item.artist?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
                         leadingContent = { Artwork(item.artwork, 44) },
                         trailingContent = { item.durationMs?.let { Text(formatTime(it.toLong())) } },

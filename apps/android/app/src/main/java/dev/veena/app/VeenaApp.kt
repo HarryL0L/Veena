@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import java.io.File
 import uniffi.veena_ffi.Veena
+import uniffi.veena_ffi.setTokenMinter
 
 /** Starts the Rust core once for the whole app. */
 class VeenaApp : Application() {
@@ -15,6 +16,8 @@ class VeenaApp : Application() {
     override fun onCreate() {
         super.onCreate()
         installBundledPlugins()
+        // Lets YouTube bricks get proof-of-origin tokens from a hidden web view.
+        setTokenMinter(PoTokenMinter(this))
         veena = Veena(filesDir.absolutePath)
         hub = PlayerHub(veena)
         BrickUpdateWorker.schedule(this)

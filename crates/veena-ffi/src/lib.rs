@@ -93,6 +93,27 @@ pub trait PlayerListener: Send + Sync {
     fn on_error(&self, message: String);
 }
 
+/// Makes YouTube proof-of-origin tokens for bricks. On Android this is a
+/// hidden web view. Called from a brick's thread and may block.
+#[uniffi::export(callback_interface)]
+pub trait TokenMinter: Send + Sync {
+    fn mint(&self, identifier: String) -> Option<String>;
+}
+
+struct MinterAdapter(Box<dyn TokenMinter>);
+
+impl veena_plugin::TokenMinter for MinterAdapter {
+    fn mint(&self, identifier: &str) -> Option<String> {
+        self.0.mint(identifier.to_string())
+    }
+}
+
+/// Let bricks ask the app for proof-of-origin tokens.
+#[uniffi::export]
+pub fn set_token_minter(minter: Box<dyn TokenMinter>) {
+    veena_plugin::set_token_minter(Some(std::sync::Arc::new(MinterAdapter(minter))));
+}
+
 #[derive(uniffi::Object)]
 pub struct Veena {
     runtime: tokio::runtime::Runtime,

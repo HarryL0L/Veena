@@ -485,3 +485,26 @@ async fn installing_a_new_version_replaces_the_old_one() {
     let tracks = registry.catalog("test").unwrap().search("").await.unwrap();
     assert_eq!(tracks[0].title, "new");
 }
+
+struct EchoMinter;
+
+impl veena_plugin::TokenMinter for EchoMinter {
+    fn mint(&self, identifier: &str) -> Option<String> {
+        Some(format!("token-for-{identifier}"))
+    }
+}
+
+#[tokio::test]
+async fn po_tokens_come_from_the_app() {
+    let code = format!(
+        "{}\nexport async function search(q) {{ return [{{ id: String(veena.poToken(q)), title: 't' }}]; }}",
+        meta("")
+    );
+    let plugin = load(&code).await.unwrap();
+    veena_plugin::set_token_minter(Some(Arc::new(EchoMinter)));
+    let with = plugin.search("abc").await.unwrap();
+    veena_plugin::set_token_minter(None);
+    let without = plugin.search("abc").await.unwrap();
+    assert_eq!(with[0].id.id, "token-for-abc");
+    assert_eq!(without[0].id.id, "null");
+}

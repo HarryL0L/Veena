@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use boa_engine::object::ObjectInitializer;
@@ -51,6 +51,22 @@ const PRELUDE: &str = r#"
   Object.freeze(veena);
 })();
 "#;
+
+/// Makes YouTube proof-of-origin tokens, which need a real browser. The
+/// Android app provides one backed by a hidden web view; elsewhere there
+/// is none and `veena.poToken` returns `null`.
+pub trait TokenMinter: Send + Sync {
+    /// A token for `identifier` (a visitor id or a video id), or `None`.
+    /// May block for several seconds the first time.
+    fn mint(&self, identifier: &str) -> Option<String>;
+}
+
+static TOKEN_MINTER: RwLock<Option<Arc<dyn TokenMinter>>> = RwLock::new(None);
+
+/// Install the token minter used by every plugin, or remove it with `None`.
+pub fn set_token_minter(minter: Option<Arc<dyn TokenMinter>>) {
+    *TOKEN_MINTER.write().unwrap_or_else(|e| e.into_inner()) = minter;
+}
 
 pub struct HostState {
     pub plugin: String,
@@ -111,6 +127,11 @@ pub fn install(context: &mut Context, config: &serde_json::Map<String, Value>) -
         .function(
             NativeFunction::from_fn_ptr(attempt),
             js_string!("attempt"),
+            1,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(po_token),
+            js_string!("poToken"),
             1,
         )
         .build();
@@ -175,6 +196,23 @@ fn attempt(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsV
         .property(js_string!("error"), error, Attribute::all())
         .build()
         .into())
+}
+
+/// `veena.poToken(identifier)`: a proof-of-origin token, or `null` when
+/// this app cannot make one.
+fn po_token(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let identifier = arg_string(args, 0, context)?;
+    if identifier.is_empty() || identifier.len() > 512 {
+        return Err(JsNativeError::typ()
+            .with_message("veena.poToken needs an identifier")
+            .into());
+    }
+    let minter = TOKEN_MINTER
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let token = minter.and_then(|m| m.mint(&identifier));
+    Ok(token.map_or_else(JsValue::null, |t| js_string!(t).into()))
 }
 
 fn cache_get(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {

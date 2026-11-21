@@ -32,6 +32,9 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -56,6 +59,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import dev.veena.app.PlayerViewModel
 import dev.veena.app.R
+import dev.veena.app.Section
 import uniffi.veena_ffi.PlayState
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.TrackInfo
@@ -79,20 +83,31 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbars) },
         topBar = {
-            OutlinedTextField(
-                value = search.query,
-                onValueChange = viewModel::onQueryChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 48.dp, bottom = 8.dp),
-                placeholder = { Text("Search songs") },
-                leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { viewModel.search() }),
-            )
+            Column(Modifier.padding(horizontal = 16.dp).padding(top = 48.dp, bottom = 8.dp)) {
+                OutlinedTextField(
+                    value = search.query,
+                    onValueChange = viewModel::onQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search songs") },
+                    leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(28.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { viewModel.search() }),
+                )
+                Spacer(Modifier.size(8.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    Section.entries.forEachIndexed { index, section ->
+                        SegmentedButton(
+                            selected = search.section == section,
+                            onClick = { viewModel.onSectionChange(section) },
+                            shape = SegmentedButtonDefaults.itemShape(index, Section.entries.size),
+                        ) {
+                            Text(section.label)
+                        }
+                    }
+                }
+            }
         },
         bottomBar = {
             if (player.current != null) {
@@ -110,8 +125,13 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
             when {
                 search.searching -> LoadingIndicator(Modifier.align(Alignment.Center).size(64.dp))
                 search.results.isEmpty() -> EmptyState(Modifier.align(Alignment.Center))
+                search.shown.isEmpty() -> Text(
+                    "No ${search.section.label.lowercase()} found",
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 else -> LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                    itemsIndexed(search.results, key = { i, t -> "$i:${t.kind}:${t.id}" }) { index, track ->
+                    itemsIndexed(search.shown, key = { i, t -> "$i:${t.kind}:${t.id}" }) { index, track ->
                         TrackRow(
                             track = track,
                             playing = player.queue.getOrNull(player.current?.toInt() ?: -1)?.id == track.id,
@@ -162,6 +182,7 @@ private fun TrackRow(track: TrackInfo, playing: Boolean, onClick: () -> Unit) {
     ListItem(
         selected = playing,
         onClick = onClick,
+        modifier = Modifier.padding(horizontal = 8.dp),
         supportingContent = {
             Text(
                 listOfNotNull(track.artist, track.source.ifEmpty { null }).joinToString(" · "),

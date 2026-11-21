@@ -32,8 +32,48 @@ struct Cli {
     #[arg(long = "config", global = true, value_name = "KEY=VALUE")]
     config: Vec<String>,
 
+    /// Program that makes YouTube proof-of-origin tokens, run as
+    /// `PROGRAM IDENTIFIER`; it prints the token. Without one, YouTube bricks
+    /// fall back to links that need no token.
+    #[arg(
+        long,
+        global = true,
+        env = "VEENA_PO_TOKEN_COMMAND",
+        value_name = "PROGRAM"
+    )]
+    po_token_command: Option<String>,
+
     #[command(subcommand)]
     command: Command,
+}
+
+/// Makes proof-of-origin tokens by running an external program.
+struct CommandMinter(String);
+
+impl veena_plugin::TokenMinter for CommandMinter {
+    fn mint(&self, identifier: &str) -> Option<String> {
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("{} \"$1\"", self.0))
+            .arg("veena")
+            .arg(identifier)
+            .stderr(std::process::Stdio::inherit())
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let token = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                (!token.is_empty()).then_some(token)
+            }
+            Ok(out) => {
+                log::warn!("token program failed: {}", out.status);
+                None
+            }
+            Err(e) => {
+                log::warn!("token program could not start: {e}");
+                None
+            }
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -151,6 +191,9 @@ async fn main() -> Result<()> {
     if cli.verbose {
         log::set_logger(&STDERR_LOGGER).ok();
         log::set_max_level(log::LevelFilter::Debug);
+    }
+    if let Some(command) = cli.po_token_command {
+        veena_plugin::set_token_minter(Some(std::sync::Arc::new(CommandMinter(command))));
     }
     let plugins_dir = cli.plugins.or_else(default_plugins_dir);
     let options = plugin_options(&cli.config)?;

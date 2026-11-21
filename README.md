@@ -179,7 +179,7 @@ Planned: a Slint desktop app.
 - [x] Automatic, signed plugin updates
 - [x] Android app with Material 3 Expressive
 - [x] Background playback, lock screen and headphone controls
-- [ ] Official YouTube Music-only tracks
+- [x] Official YouTube Music tracks on Android (proof-of-origin tokens)
 - [ ] Linux app
 - [ ] Offline downloads, lyrics, gapless playback
 

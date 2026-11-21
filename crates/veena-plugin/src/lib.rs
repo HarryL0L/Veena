@@ -21,8 +21,8 @@
 //!
 //! Each plugin runs in its own Boa JavaScript engine on its own thread. It
 //! cannot read files, import code or open connections; it can only call the
-//! host API (`veena.http`, `veena.cache`, `veena.config`, `veena.log`), and
-//! network access is limited to the domains it declares.
+//! host API (`veena.http`, `veena.cache`, `veena.config`, `veena.log`,
+//! `veena.poToken`), and network access is limited to the domains it declares.
 
 mod brick;
 mod convert;
@@ -34,6 +34,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 pub use brick::{PluginBrick, load_dir};
+pub use host::{TokenMinter, set_token_minter};
 
 /// Version of the host API plugins are written against. A plugin must
 /// declare the same `api` number to be loaded.

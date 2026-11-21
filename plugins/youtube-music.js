@@ -7,7 +7,7 @@
 export const meta = {
   id: "youtube-music",
   name: "YouTube Music",
-  version: "0.2.1",
+  version: "0.2.2",
   api: 1,
   kinds: ["youtube"],
   domains: ["youtube.com"],
@@ -141,6 +141,9 @@ function parseRow(row) {
   if (!title) return null;
 
   const details = columns.slice(1).flat();
+  // Podcast episodes appear when searching without the songs filter.
+  const kind = details[0]?.text?.trim();
+  if (kind === "Episode" || kind === "Podcast") return null;
   const fixed = (row.fixedColumns ?? []).flatMap(
     (c) => c.musicResponsiveListItemFixedColumnRenderer?.text?.runs ?? [],
   );
