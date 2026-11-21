@@ -70,7 +70,8 @@ export async function resolve(track) {
       const current = await withCurrentVersion(client);
       label = `${current.name} ${current.version}`;
       const streams = await streamsFrom(current, track.id, solved);
-      const failure = await probe(streams[0]);
+      // `--config probe=false` skips the download check, for diagnosis.
+      const failure = veena.config.probe === false ? undefined : await probe(streams[0]);
       if (failure) throw new Error(`links refused when downloading ${failure}`);
       veena.log(`${label}: links work`);
       return streams.map(({ size, ...stream }) => stream);
