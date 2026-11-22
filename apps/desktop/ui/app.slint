@@ -1004,19 +1004,122 @@ component SidePanel inherits Rectangle {
     in property <bool> has-song;
     in property <[LyricLine]> lyrics;
     in property <string> lyrics-note;
+    // For the "ready to play" side when nothing is on.
+    in property <SceneInfo> scene;
+    in property <bool> ambience;
+    in property <string> greeting;
+    in property <[Song]> recent;
+    in property <int> liked-count;
+    in property <[string]> moods;
     callback like();
+    callback resume();
+    callback shuffle-liked();
+    callback mood(string);
     width: 360px;
     border-radius: Theme.radius;
     clip: true;
     background: @linear-gradient(180deg, Theme.accent-container 0%, Theme.background 55%, Theme.background 100%);
     animate background { duration: 500ms; }
+    // Nothing on: a window onto the sky, and quick ways to start.
     if !root.has-song: VerticalLayout {
-        alignment: center;
-        padding: 32px;
-        spacing: 8px;
-        Icon { source: @image-url("icons/music_note.svg"); tint: Theme.accent; width: 56px; height: 56px; x: (parent.width - self.width) / 2; }
-        Text { text: "Nothing playing"; color: Theme.on-surface; font-size: 18px; font-weight: 700; horizontal-alignment: center; }
-        Text { text: "Double-click a song, or press Enter in search."; color: Theme.muted; horizontal-alignment: center; wrap: word-wrap; }
+        padding: 20px;
+        spacing: 14px;
+        Rectangle {
+            height: 200px;
+            border-radius: 24px;
+            clip: true;
+            background: Theme.surface-high;
+            if root.ambience: AmbientScene { width: 100%; height: 100%; info: root.scene; fade: false; }
+            if !root.ambience: Icon {
+                source: @image-url("icons/veena.svg");
+                width: 72px;
+                height: 72px;
+                colorize: transparent;
+            }
+            Text {
+                x: 18px;
+                y: parent.height - self.height - 14px;
+                text: "Ready when you are";
+                color: #ffffff;
+                font-size: 20px;
+                font-weight: 800;
+            }
+        }
+        if root.recent.length > 0: Rectangle {
+            height: 72px;
+            border-radius: 20px;
+            background: resume-area.has-hover ? Theme.surface-highest : Theme.surface-high;
+            animate background { duration: 150ms; }
+            resume-area := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.resume(); }
+            }
+            HorizontalLayout {
+                padding: 8px;
+                padding-right: 12px;
+                spacing: 12px;
+                Artwork { art: root.recent[0].art; width: 56px; height: 56px; corner: 14px; }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text { text: "Pick up where you left off"; color: Theme.accent; font-size: 12px; font-weight: 700; }
+                    Text { text: root.recent[0].title; color: Theme.on-surface; font-weight: 600; overflow: elide; }
+                    Text { text: root.recent[0].artist; color: Theme.muted; font-size: 12px; overflow: elide; }
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: @image-url("icons/play.svg");
+                    fill: Theme.accent;
+                    tint: Theme.background;
+                    clicked => { root.resume(); }
+                }
+            }
+        }
+        if root.liked-count > 0: Rectangle {
+            height: 52px;
+            border-radius: 26px;
+            background: shuffle-area.has-hover ? Theme.accent.brighter(0.1) : Theme.accent;
+            shuffle-area := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.shuffle-liked(); }
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 8px;
+                Icon { source: @image-url("icons/shuffle.svg"); tint: Theme.background; y: (parent.height - self.height) / 2; }
+                Text {
+                    text: "Shuffle liked songs (" + root.liked-count + ")";
+                    color: Theme.background;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        Text { text: "Something for now"; color: Theme.on-surface; font-weight: 700; }
+        for mood[i] in root.moods: Rectangle {
+            visible: i < 3;
+            height: i < 3 ? 44px : 0;
+            border-radius: 14px;
+            background: mood-area.has-hover ? Theme.surface-highest : Theme.surface-container;
+            mood-area := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.mood(mood); }
+            }
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 10px;
+                Icon { source: @image-url("icons/search.svg"); tint: Theme.muted; width: 18px; height: 18px; y: (parent.height - self.height) / 2; }
+                Text { text: mood; color: Theme.on-surface; vertical-alignment: center; horizontal-stretch: 1; }
+            }
+        }
+        Rectangle { }
+        Text {
+            text: "Space play/pause · Ctrl+F search · ←/→ seek · Ctrl+←/→ previous/next";
+            color: Theme.muted;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
     }
     if root.has-song: VerticalLayout {
         padding: 24px;
@@ -1256,6 +1359,7 @@ export component AppWindow inherits Window {
     callback set-offline(bool);
     callback ambience-changed();
     callback set-autoplay(bool);
+    callback shuffle-liked();
 
     // Keyboard shortcuts. Keys typed into the search field go there first.
     keys := FocusScope {
@@ -1378,7 +1482,16 @@ export component AppWindow inherits Window {
                     has-song: root.has-song;
                     lyrics: root.lyrics;
                     lyrics-note: root.lyrics-note;
+                    scene: root.scene;
+                    ambience: root.amb-enabled;
+                    greeting: root.greeting;
+                    recent: root.recent;
+                    liked-count: root.liked.length;
+                    moods: root.moods;
                     like => { root.like-now(); }
+                    resume => { root.song-action(1, 0, SongAction.play); }
+                    shuffle-liked => { root.shuffle-liked(); }
+                    mood(q) => { root.search(q); }
                 }
             }
 

@@ -468,6 +468,23 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
         })
     });
     window.on_like_now(|| with_ui(|ui| toggle_like(ui, ui.current().cloned())));
+    window.on_shuffle_liked(|| {
+        with_ui(|ui| {
+            let liked = ui.liked.clone();
+            if liked.is_empty() {
+                return;
+            }
+            // A different song to start with each time.
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos() as usize);
+            let start = (nanos % liked.len()) as u32;
+            background(&ui.veena, move |v| {
+                v.set_shuffle(true);
+                v.play(liked, start);
+            });
+        })
+    });
     window.on_seek_by(|delta| {
         with_ui(|ui| {
             let at = (ui.state.position_ms as i64 + delta as i64).max(0) as u64;
