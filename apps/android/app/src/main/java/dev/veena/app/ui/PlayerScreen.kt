@@ -35,8 +35,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconToggleButton
@@ -403,36 +401,28 @@ private fun SleepMenu(sleep: SleepTimer?, onSleep: (Int?) -> Unit, onCancel: () 
                 tint = if (sleep != null) MaterialTheme.colorScheme.primary else LocalContentColor.current,
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        VeenaMenu(expanded = open, onDismiss = { open = false }) {
             Text(
                 "Sleep timer",
                 style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
             listOf(15, 30, 45, 60).forEach { minutes ->
-                DropdownMenuItem(
-                    text = { Text(if (minutes == 60) "1 hour" else "$minutes minutes") },
-                    onClick = {
-                        open = false
-                        onSleep(minutes)
-                    },
-                )
-            }
-            DropdownMenuItem(
-                text = { Text("End of this song") },
-                onClick = {
+                VeenaMenuItem(if (minutes == 60) "1 hour" else "$minutes minutes") {
                     open = false
-                    onSleep(null)
-                },
-            )
+                    onSleep(minutes)
+                }
+            }
+            VeenaMenuItem("End of this song") {
+                open = false
+                onSleep(null)
+            }
             if (sleep != null) {
-                DropdownMenuItem(
-                    text = { Text("Turn off") },
-                    onClick = {
-                        open = false
-                        onCancel()
-                    },
-                )
+                VeenaMenuItem("Turn off") {
+                    open = false
+                    onCancel()
+                }
             }
         }
     }

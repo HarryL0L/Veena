@@ -22,8 +22,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -64,7 +62,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -398,29 +395,23 @@ fun TrackRow(
                 fontWeight = if (playing) FontWeight.Bold else null,
             )
         }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, offset = DpOffset(24.dp, 0.dp)) {
+        if (menu) {
             val liked = actions.isLiked(track)
-            MenuItem("Play next", R.drawable.ic_skip_next) { menu = false; actions.onPlayNext(track) }
-            MenuItem("Add to queue", R.drawable.ic_queue_music) { menu = false; actions.onAddToQueue(track) }
-            MenuItem(if (liked) "Remove from liked" else "Like", if (liked) R.drawable.ic_favorite else R.drawable.ic_favorite_border) {
-                menu = false
-                actions.onToggleLike(track)
-            }
-            MenuItem("Add to playlist…", R.drawable.ic_playlist_add) { menu = false; actions.onAddToPlaylist(track) }
-            extra.forEach { (label, action) ->
-                MenuItem(label, R.drawable.ic_delete) { menu = false; action() }
-            }
+            SongSheet(
+                track = track,
+                actions = listOf(
+                    SongAction("Play next", R.drawable.ic_skip_next) { actions.onPlayNext(track) },
+                    SongAction("Add to queue", R.drawable.ic_queue_music) { actions.onAddToQueue(track) },
+                    SongAction(
+                        if (liked) "Remove from liked" else "Like",
+                        if (liked) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
+                    ) { actions.onToggleLike(track) },
+                    SongAction("Add to playlist…", R.drawable.ic_playlist_add) { actions.onAddToPlaylist(track) },
+                ) + extra.map { (label, action) -> SongAction(label, REMOVE_ICON, action) },
+                onDismiss = { menu = false },
+            )
         }
     }
-}
-
-@Composable
-private fun MenuItem(label: String, icon: Int, onClick: () -> Unit) {
-    DropdownMenuItem(
-        text = { Text(label) },
-        leadingIcon = { Icon(painterResource(icon), contentDescription = null) },
-        onClick = onClick,
-    )
 }
 
 @Composable

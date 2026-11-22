@@ -18,8 +18,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -186,28 +184,28 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
                 Spacer(Modifier.weight(1f))
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "More options") }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    VeenaMenu(expanded = menu, onDismiss = { menu = false }) {
                         when (collection) {
                             is SongList.Playlist -> {
-                                DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = true })
-                                DropdownMenuItem(text = { Text("Delete playlist") }, onClick = {
+                                VeenaMenuItem("Rename", R.drawable.ic_edit) { menu = false; renaming = true }
+                                VeenaMenuItem("Delete playlist", R.drawable.ic_delete) {
                                     menu = false
                                     viewModel.library.deletePlaylist(collection.id)
                                     onBack()
-                                })
+                                }
                             }
-                            SongList.History -> DropdownMenuItem(text = { Text("Clear history") }, onClick = {
+                            SongList.History -> VeenaMenuItem("Clear history", R.drawable.ic_delete) {
                                 menu = false
                                 viewModel.library.clearHistory()
-                            })
-                            SongList.Liked -> DropdownMenuItem(text = { Text("Add all to queue") }, onClick = {
+                            }
+                            SongList.Liked -> VeenaMenuItem("Add all to queue", R.drawable.ic_queue_music) {
                                 menu = false
                                 tracks.forEach(actions.onAddToQueue)
-                            })
-                            SongList.Offline -> DropdownMenuItem(text = { Text("Clear all") }, onClick = {
+                            }
+                            SongList.Offline -> VeenaMenuItem("Clear all", R.drawable.ic_delete) {
                                 menu = false
                                 viewModel.library.clearCache()
-                            })
+                            }
                         }
                     }
                 }
