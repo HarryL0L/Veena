@@ -10,6 +10,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -150,7 +153,12 @@ fun HomeScreen(
             item(key = "recent") {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     itemsIndexed(history.take(20), key = { _, t -> "${t.kind}:${t.id}" }) { index, track ->
-                        SongCard(track, playing = actions.isPlaying(track)) { viewModel.playList(history, index) }
+                        SongCard(
+                            track,
+                            playing = actions.isPlaying(track),
+                            actions = actions,
+                            onRemove = { viewModel.library.removeFromHistory(track) },
+                        ) { viewModel.playList(history, index) }
                     }
                 }
             }
@@ -446,9 +454,44 @@ fun SectionTitle(title: String, action: String? = null, onAction: () -> Unit = {
 }
 
 @Composable
-private fun SongCard(track: TrackInfo, playing: Boolean, onClick: () -> Unit) {
+private fun SongCard(
+    track: TrackInfo,
+    playing: Boolean,
+    actions: TrackActions,
+    onRemove: () -> Unit,
+    onClick: () -> Unit,
+) {
     val press = remember { MutableInteractionSource() }
-    Column(Modifier.width(152.dp).pressScale(press).clickable(press, LocalIndication.current, onClick = onClick)) {
+    var sheet by remember { mutableStateOf(false) }
+    if (sheet) {
+        val liked = actions.isLiked(track)
+        SongSheet(
+            track = track,
+            actions = listOf(
+                SongAction("Play next", R.drawable.ic_skip_next) { actions.onPlayNext(track) },
+                SongAction("Add to queue", R.drawable.ic_queue_music) { actions.onAddToQueue(track) },
+                SongAction(
+                    if (liked) "Remove from liked" else "Like",
+                    if (liked) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
+                ) { actions.onToggleLike(track) },
+                SongAction("Add to playlist…", R.drawable.ic_playlist_add) { actions.onAddToPlaylist(track) },
+                SongAction("Remove from recently played", REMOVE_ICON, onRemove),
+            ),
+            onDismiss = { sheet = false },
+        )
+    }
+    Column(
+        Modifier
+            .width(152.dp)
+            .pressScale(press)
+            .combinedClickable(
+                interactionSource = press,
+                indication = LocalIndication.current,
+                onLongClickLabel = "More options",
+                onLongClick = { sheet = true },
+                onClick = onClick,
+            ),
+    ) {
         Box {
             Artwork(track.artwork, 152)
             if (playing) PlayingOverlay(Modifier.matchParentSize().clip(RoundedCornerShape(28.dp)))

@@ -577,6 +577,12 @@ impl Veena {
             .collect()
     }
 
+    /// Take one song out of Recently played.
+    pub fn remove_from_history(&self, track: TrackInfo) {
+        self.library
+            .remove_from_history(&TrackId::new(track.kind, track.id));
+    }
+
     pub fn clear_history(&self) {
         self.library.clear_history();
     }

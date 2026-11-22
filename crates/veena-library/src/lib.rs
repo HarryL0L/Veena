@@ -151,6 +151,15 @@ impl Library {
         });
     }
 
+    /// Take one song out of the history; returns whether it was there.
+    pub fn remove_from_history(&self, id: &TrackId) -> bool {
+        self.change(|d| {
+            let before = d.history.len();
+            d.history.retain(|p| &p.entry.track.id != id);
+            d.history.len() != before
+        })
+    }
+
     pub fn clear_history(&self) {
         self.change(|d| {
             d.history.clear();
@@ -353,6 +362,20 @@ mod tests {
         }
         assert_eq!(lib.history().len(), HISTORY_LIMIT);
         fs::remove_dir_all(lib.path().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn one_song_can_leave_the_history() {
+        let path = temp_path("remove-history");
+        let library = Library::open(&path);
+        library.record_played(entry("a"));
+        library.record_played(entry("b"));
+        assert!(library.remove_from_history(&entry("a").track.id));
+        assert!(!library.remove_from_history(&entry("a").track.id));
+        let history = Library::open(&path).history();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].entry.track.id, entry("b").track.id);
+        let _ = fs::remove_file(path);
     }
 
     #[test]

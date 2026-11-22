@@ -269,6 +269,7 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
             val extra = when (collection) {
                 is SongList.Playlist -> listOf("Remove from playlist" to { viewModel.library.removeFromPlaylist(collection.id, index) })
                 SongList.Offline -> listOf("Remove from this phone" to { viewModel.library.removeFromCache(track) })
+                SongList.History -> listOf("Remove from recently played" to { viewModel.library.removeFromHistory(track) })
                 else -> emptyList()
             }
             TrackRow(track, actions, onClick = { viewModel.playList(tracks, index) }, showSource = false, extra = extra)

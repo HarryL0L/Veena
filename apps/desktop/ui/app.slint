@@ -204,7 +204,7 @@ component PlayingOverlay inherits Rectangle {
 // ---------------------------------------------------------------- Song tables
 
 /// What a song row can ask for (sent with the list and the row number).
-export enum SongAction { play, like, play-next, queue }
+export enum SongAction { play, like, play-next, queue, remove-from-history }
 
 /// Column widths shared by the header and the rows.
 global Columns {
@@ -326,16 +326,28 @@ component SongTable inherits VerticalLayout {
     }
 }
 
+/// A song in the Recently played row. Right-click for more.
 component SongCard inherits Rectangle {
     in property <Song> song;
     callback clicked;
+    callback action(SongAction);
     width: 180px;
     height: 236px;
     border-radius: 20px;
     background: area.has-hover ? Theme.surface-high : transparent;
-    area := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+    ContextMenuArea {
+        Menu {
+            MenuItem { title: "Play"; activated => { root.clicked(); } }
+            MenuItem { title: "Play next"; activated => { root.action(SongAction.play-next); } }
+            MenuItem { title: "Add to queue"; activated => { root.action(SongAction.queue); } }
+            MenuSeparator { }
+            MenuItem { title: root.song.liked ? "Remove from liked" : "Like"; activated => { root.action(SongAction.like); } }
+            MenuItem { title: "Remove from recently played"; activated => { root.action(SongAction.remove-from-history); } }
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(); }
+        }
     }
     VerticalLayout {
         padding: 10px;
@@ -545,6 +557,7 @@ component HomePage inherits Rectangle {
                         for song[i] in root.recent: SongCard {
                             song: song;
                             clicked => { root.recent-action(i, SongAction.play); }
+                            action(a) => { root.recent-action(i, a); }
                         }
                     }
                 }

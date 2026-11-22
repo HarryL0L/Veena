@@ -74,6 +74,12 @@ class LibraryHub(private val veena: Veena, player: PlayerHub) {
 
     fun clearHistory() = change { clearHistory() }
 
+    /** Take one song out of Recently played; it disappears at once. */
+    fun removeFromHistory(track: TrackInfo) {
+        _history.value = _history.value.filterNot { it.kind == track.kind && it.id == track.id }
+        change { removeFromHistory(track) }
+    }
+
     fun isCached(track: TrackInfo) = _cached.value.any { it.kind == track.kind && it.id == track.id }
 
     fun clearCache() {

@@ -423,6 +423,15 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
                         background(&ui.veena, move |v| v.play_next(t));
                     }
                 }
+                SongAction::RemoveFromHistory => {
+                    if let Some(t) = tracks.get(index as usize).cloned() {
+                        let k = key(&t);
+                        // Gone at once; the core saves the change.
+                        ui.recent.retain(|r| key(r) != k);
+                        ui.refresh_lists();
+                        background(&ui.veena, move |v| v.remove_from_history(t));
+                    }
+                }
                 SongAction::Queue => {
                     if let Some(t) = tracks.get(index as usize).cloned() {
                         background(&ui.veena, move |v| v.enqueue(vec![t]));
