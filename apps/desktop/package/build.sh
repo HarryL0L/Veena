@@ -1,9 +1,10 @@
 #!/bin/sh
-# Build the Linux download: dist/veena-music-linux-x86_64.tar.gz
+# Build the Linux download for this machine's architecture:
+# dist/veena-music-linux-<arch>.tar.gz (x86_64 or aarch64).
 # Run from the repository root.
 set -eu
 cargo build --release --locked -p veena-desktop -p veena
-name=veena-music-linux-x86_64
+name="veena-music-linux-$(uname -m)"
 out="dist/$name"
 rm -rf "$out"
 mkdir -p "$out"

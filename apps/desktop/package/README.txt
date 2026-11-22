@@ -1,4 +1,4 @@
-Veena Music for Linux (x86_64)
+Veena Music for Linux (x86_64 and arm64 builds)
 
 Install:    ./install.sh      (for your user; no root needed)
 Run:        from your app menu, or `veena-desktop`

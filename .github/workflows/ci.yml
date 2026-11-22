@@ -84,11 +84,19 @@ jobs:
           path: dist/*.apk
 
   linux:
-    name: Linux app (download)
-    # The oldest supported runner, so the download runs on older distros too.
-    runs-on: ubuntu-24.04
+    name: Linux app (${{ matrix.arch }})
+    # Built natively on each architecture, on the oldest supported runner so
+    # the download runs on older distros too.
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     concurrency:
-      group: linux-${{ github.ref }}
+      group: linux-${{ matrix.arch }}-${{ github.ref }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
@@ -100,7 +108,7 @@ jobs:
         run: apps/desktop/package/build.sh
       - uses: actions/upload-artifact@v7
         with:
-          name: veena-linux
+          name: veena-linux-${{ matrix.arch }}
           path: dist/*.tar.gz
 
   nightly:
@@ -131,7 +139,7 @@ jobs:
           {
             printf 'Built from %s on branch %s.\n\n%s\n\n' "${GITHUB_SHA::7}" "$GITHUB_REF_NAME" "$(printf '%s' "$MESSAGE" | head -1)"
             printf -- '- **Phone:** veena-arm64.apk (the x86_64 one is for emulators)\n'
-            printf -- '- **Linux:** veena-music-linux-x86_64.tar.gz: unpack, then run ./install.sh\n'
+            printf -- '- **Linux:** veena-music-linux-x86_64.tar.gz (most PCs) or veena-music-linux-aarch64.tar.gz (ARM: Raspberry Pi, Asahi, ARM laptops). Unpack, then run ./install.sh\n'
           } > notes.md
           gh release create nightly dist/* --prerelease --title "Nightly build" \
             --notes-file notes.md --target "$GITHUB_SHA"
