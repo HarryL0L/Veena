@@ -1,5 +1,7 @@
 # Additional permission for bricks
 
+Copyright (C) 2026 HarryL0L
+
 Veena Music is free software under the GNU General Public License, version 3
 or (at your option) any later version. See [LICENSE](LICENSE).
 

@@ -220,6 +220,8 @@ See [SECURITY.md](SECURITY.md) to report a problem.
 
 ## License
 
+Copyright (C) 2026 HarryL0L
+
 Veena Music is free software: you can redistribute it and/or modify it under
 the terms of the [GNU General Public License](LICENSE), version 3 or (at your
 option) any later version. It comes with no warranty.

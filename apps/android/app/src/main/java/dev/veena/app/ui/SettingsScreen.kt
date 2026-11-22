@@ -340,7 +340,7 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
                             index = 1, count = 3,
                             icon = R.drawable.ic_license,
                             title = "Licence",
-                            subtitle = "Free software under the GNU GPL, version 3 or later",
+                            subtitle = "© 2026 HarryL0L · Free software under the GNU GPL, version 3 or later",
                             onClick = { uriHandler.openUri("https://www.gnu.org/licenses/gpl-3.0.html") },
                         )
                     },
