@@ -236,7 +236,7 @@ impl Moment {
                 "Morning acoustic",
                 "Coffee jazz",
                 "Upbeat pop",
-                "Morning ragas",
+                "Morning chill",
             ],
             h if (12.0..17.0).contains(&h) => ["Focus beats", "Feel-good hits", "Indie", "Workout"],
             h if (17.0..22.0).contains(&h) => [

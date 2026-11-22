@@ -274,7 +274,7 @@ private fun momentName(a: Ambience): String = when (a.dayPart) {
 /** Searches that suit the moment: the time of day, then the season or special day. */
 private fun moodsFor(a: Ambience): List<String> {
     val time = when {
-        a.hour >= 5f && a.hour < 12f -> listOf("Morning acoustic", "Coffee jazz", "Upbeat pop", "Morning ragas")
+        a.hour >= 5f && a.hour < 12f -> listOf("Morning acoustic", "Coffee jazz", "Upbeat pop", "Morning chill")
         a.hour >= 12f && a.hour < 17f -> listOf("Focus beats", "Feel-good hits", "Indie", "Workout")
         a.hour >= 17f && a.hour < 22f -> listOf("Sunset chill", "Evening jazz", "Retro classics", "Road trip")
         else -> listOf("Late night lo-fi", "Soft piano", "Ambient", "Sleep")
@@ -373,14 +373,14 @@ private data class Genre(val name: String, val query: String, val shape: Shape)
 @Composable
 private fun ExploreGrid(onSearch: (String?) -> Unit) {
     val genres = listOf(
-            Genre("Carnatic", "carnatic veena", MaterialShapes.Flower.toShape()),
-            Genre("Bollywood", "bollywood hits", MaterialShapes.Cookie9Sided.toShape()),
             Genre("Pop", "pop hits", MaterialShapes.Sunny.toShape()),
             Genre("Hip hop", "hip hop", MaterialShapes.Clover4Leaf.toShape()),
-            Genre("Lo-fi", "lofi beats", MaterialShapes.Puffy.toShape()),
             Genre("Rock", "rock classics", MaterialShapes.SoftBurst.toShape()),
             Genre("Electronic", "electronic dance", MaterialShapes.Gem.toShape()),
+            Genre("R&B", "r&b soul", MaterialShapes.Flower.toShape()),
+            Genre("Jazz", "jazz classics", MaterialShapes.Cookie9Sided.toShape()),
             Genre("Classical", "classical music", MaterialShapes.Cookie6Sided.toShape()),
+            Genre("Lo-fi", "lofi beats", MaterialShapes.Puffy.toShape()),
     )
     val scheme = MaterialTheme.colorScheme
     val colors = listOf(

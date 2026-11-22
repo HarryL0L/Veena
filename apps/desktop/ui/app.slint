@@ -560,17 +560,17 @@ component HomePage inherits Rectangle {
                 SectionTitle { text: "Explore"; }
                 HorizontalLayout {
                     spacing: 12px;
-                    GenreTile { label: "Carnatic"; tone: #3b2f63; clicked => { root.search-for("carnatic veena"); } }
-                    GenreTile { label: "Bollywood"; tone: #5a2d45; reverse: true; clicked => { root.search-for("bollywood hits"); } }
                     GenreTile { label: "Pop"; tone: #24485a; clicked => { root.search-for("pop hits"); } }
                     GenreTile { label: "Hip hop"; tone: #4d3d1f; reverse: true; clicked => { root.search-for("hip hop"); } }
+                    GenreTile { label: "Rock"; tone: #522a2a; clicked => { root.search-for("rock classics"); } }
+                    GenreTile { label: "Electronic"; tone: #27375e; reverse: true; clicked => { root.search-for("electronic dance"); } }
                 }
                 HorizontalLayout {
                     spacing: 12px;
-                    GenreTile { label: "Lo-fi"; tone: #2a4a3a; reverse: true; clicked => { root.search-for("lofi beats"); } }
-                    GenreTile { label: "Rock"; tone: #522a2a; clicked => { root.search-for("rock classics"); } }
-                    GenreTile { label: "Electronic"; tone: #27375e; reverse: true; clicked => { root.search-for("electronic dance"); } }
-                    GenreTile { label: "Classical"; tone: #44402a; clicked => { root.search-for("classical music"); } }
+                    GenreTile { label: "R&B"; tone: #5a2d45; reverse: true; clicked => { root.search-for("r&b soul"); } }
+                    GenreTile { label: "Jazz"; tone: #3b2f63; clicked => { root.search-for("jazz classics"); } }
+                    GenreTile { label: "Classical"; tone: #44402a; reverse: true; clicked => { root.search-for("classical music"); } }
+                    GenreTile { label: "Lo-fi"; tone: #2a4a3a; clicked => { root.search-for("lofi beats"); } }
                 }
                 if root.liked.length > 0: SectionTitle { text: "Liked songs"; }
                 if root.liked.length > 0: SongTable {
