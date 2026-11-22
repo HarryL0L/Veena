@@ -999,6 +999,64 @@ component SeekBar inherits Rectangle {
 }
 
 /// The current song large, with its lyrics following along.
+/// Up to four recent covers in a grid, each slowly zooming and drifting.
+component ArtMosaic inherits Rectangle {
+    in property <[Song]> songs;
+    property <float> t: animation-tick() / 1ms / 1000;
+    property <int> count: min(4, songs.length);
+    clip: true;
+    for song[i] in root.songs: Rectangle {
+        visible: i < root.count;
+        // One cover fills the window; two sit side by side; three or four make a grid.
+        property <bool> single: root.count == 1;
+        property <int> tile-col: root.count == 2 ? i : mod(i, 2);
+        property <int> tile-row: root.count <= 2 ? 0 : (i < 2 ? 0 : 1);
+        property <int> cols: root.count == 1 ? 1 : 2;
+        property <int> rows: root.count <= 2 ? 1 : 2;
+        // The third of three spans the bottom row.
+        property <bool> wide: root.count == 3 && i == 2;
+        x: self.tile-col * root.width / self.cols;
+        y: self.tile-row * root.height / self.rows;
+        width: self.wide ? root.width : root.width / self.cols;
+        height: root.height / self.rows;
+        clip: true;
+        Image {
+            source: song.art;
+            image-fit: cover;
+            property <float> zoom: 1.12 + 0.08 * sin((root.t * 0.12 + i * 1.7) * 1rad);
+            width: parent.width * self.zoom;
+            height: parent.height * self.zoom;
+            x: (parent.width - self.width) / 2 + sin((root.t * 0.09 + i * 2.3) * 1rad) * parent.width * 0.04;
+            y: (parent.height - self.height) / 2 + cos((root.t * 0.07 + i * 1.1) * 1rad) * parent.height * 0.04;
+        }
+    }
+}
+
+/// The Veena mark with rings of sound going out from it.
+component Resonance inherits Rectangle {
+    property <float> t: animation-tick() / 1ms / 1000;
+    background: @radial-gradient(circle, #1a2a4d 0%, #08101f 100%);
+    for i in 3: Rectangle {
+        // Each ring grows and fades over three seconds, a second apart.
+        property <float> p: (root.t / 3 + i / 3.0) - floor(root.t / 3 + i / 3.0);
+        width: 60px + self.p * 180px;
+        height: self.width;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 - 10px;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: #ffb89c;
+        opacity: (1 - self.p) * 0.7;
+    }
+    Image {
+        source: @image-url("icons/veena-mark.svg");
+        width: 96px;
+        height: 96px;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 - 14px;
+    }
+}
+
 component SidePanel inherits Rectangle {
     in property <Song> song;
     in property <bool> has-song;
@@ -1029,12 +1087,12 @@ component SidePanel inherits Rectangle {
             border-radius: 24px;
             clip: true;
             background: Theme.surface-high;
-            if root.ambience: AmbientScene { width: 100%; height: 100%; info: root.scene; fade: false; }
-            if !root.ambience: Icon {
-                source: @image-url("icons/veena.svg");
-                width: 72px;
-                height: 72px;
-                colorize: transparent;
+            // Your recent songs' artwork, slowly drifting...
+            if root.recent.length > 0: ArtMosaic { width: 100%; height: 100%; songs: root.recent; }
+            // ...or, before there is any, the Veena mark sending out rings.
+            if root.recent.length == 0: Resonance { width: 100%; height: 100%; }
+            Rectangle {
+                background: @linear-gradient(180deg, #00000000 40%, #000000aa 100%);
             }
             Text {
                 x: 18px;
