@@ -36,7 +36,6 @@ import dev.veena.app.SettingsState
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.Month
-import java.time.temporal.ChronoUnit
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -45,11 +44,9 @@ import kotlin.math.sin
 import kotlin.random.Random
 import kotlinx.coroutines.delay
 
-/** Days that get their own decorations. */
+/** Days that get their own decorations: only ones shared almost everywhere. */
 enum class Occasion(val greeting: String, val line: String) {
-    DIWALI("Happy Diwali", "Lamps lit, sweets shared, music on."),
     NEW_YEAR("Happy New Year", "A fresh year of songs ahead."),
-    VALENTINE("Happy Valentine's Day", "Play something for someone."),
 }
 
 /** What the living background shows: the hour (0–24), the season and any special day. */
@@ -122,22 +119,9 @@ fun seasonOf(date: LocalDate, southern: Boolean): Season {
     }
 }
 
-/**
- * Lakshmi Puja dates (India). Diwali follows the lunar calendar, so the
- * dates are listed; the decorations stay up two days either side.
- */
-private val DIWALI = listOf(
-    LocalDate.of(2026, 11, 8),
-    LocalDate.of(2027, 10, 29),
-    LocalDate.of(2028, 10, 17),
-    LocalDate.of(2029, 11, 5),
-    LocalDate.of(2030, 10, 26),
-)
-
+/** New Year's Eve and New Year's Day. */
 fun occasionOf(date: LocalDate): Occasion? = when {
-    DIWALI.any { abs(ChronoUnit.DAYS.between(it, date)) <= 2 } -> Occasion.DIWALI
     (date.month == Month.DECEMBER && date.dayOfMonth == 31) || (date.month == Month.JANUARY && date.dayOfMonth == 1) -> Occasion.NEW_YEAR
-    date.month == Month.FEBRUARY && date.dayOfMonth == 14 -> Occasion.VALENTINE
     else -> null
 }
 
@@ -227,15 +211,7 @@ fun AmbientScene(ambience: Ambience, modifier: Modifier = Modifier, fadeBottom: 
             Season.SUMMER -> drawSummer(seeds, t, night)
             Season.AUTUMN -> drawLeaves(seeds, t)
         }
-        when (ambience.occasion) {
-            Occasion.DIWALI -> {
-                drawGarlands(t)
-                if (night > 0.4f) drawFireworks(t, night, warm = true)
-            }
-            Occasion.NEW_YEAR -> drawFireworks(t, 0.5f + night / 2f, warm = false)
-            Occasion.VALENTINE -> drawHearts(seeds, t)
-            null -> Unit
-        }
+        if (ambience.occasion == Occasion.NEW_YEAR) drawFireworks(t, 0.5f + night / 2f)
         if (fadeBottom) {
             drawRect(
                 Brush.verticalGradient(0f to Color.Black, 0.4f to Color.Black.copy(alpha = 0.85f), 1f to Color.Transparent),
@@ -263,12 +239,6 @@ private class Seeds {
         moveTo(-0.5f, 0f)
         quadraticTo(0f, -0.45f, 0.5f, 0f)
         quadraticTo(0f, 0.45f, -0.5f, 0f)
-        close()
-    }
-    val heart = Path().apply {
-        moveTo(0f, 0.35f)
-        cubicTo(-0.6f, -0.05f, -0.35f, -0.55f, 0f, -0.22f)
-        cubicTo(0.35f, -0.55f, 0.6f, -0.05f, 0f, 0.35f)
         close()
     }
     val crescent = Path().apply {
@@ -496,40 +466,12 @@ private fun DrawScope.drawSummer(seeds: Seeds, t: Float, night: Float) {
     }
 }
 
-// ---------------------------------------------------------------- Special days
+// ---------------------------------------------------------------- New Year
 
-private val GARLAND = listOf(Color(0xFFFFD54F), Color(0xFFFF8A65), Color(0xFFF06292), Color(0xFFFFB300), Color(0xFFAED581))
-
-/** Diwali: strings of twinkling lights hung across the top. */
-private fun DrawScope.drawGarlands(t: Float) {
-    val rows = listOf(10.dp.toPx() to 22.dp.toPx(), 4.dp.toPx() to 40.dp.toPx())
-    rows.forEachIndexed { row, (top, sag) ->
-        val wire = Path()
-        val steps = 40
-        for (s in 0..steps) {
-            val f = s / steps.toFloat()
-            val x = size.width * f
-            val y = top + sag * 4f * f * (1f - f)
-            if (s == 0) wire.moveTo(x, y) else wire.lineTo(x, y)
-        }
-        drawPath(wire, Color(0xFF6D4C41).copy(alpha = 0.6f), style = Stroke(1.dp.toPx()))
-        val bulbs = (size.width / 24.dp.toPx()).toInt()
-        for (b in 1 until bulbs) {
-            val f = b / bulbs.toFloat()
-            val c = Offset(size.width * f, top + sag * 4f * f * (1f - f) + 4.dp.toPx())
-            val color = GARLAND[(b + row * 2) % GARLAND.size]
-            val glow = 0.45f + 0.55f * ((sin(t * 2.6f + b * 1.7f + row) + 1f) / 2f)
-            drawCircle(color.copy(alpha = 0.35f * glow), 8.dp.toPx(), c)
-            drawCircle(color.copy(alpha = 0.6f + 0.4f * glow), 3.dp.toPx(), c)
-        }
-    }
-}
-
-private val WARM = listOf(Color(0xFFFFD54F), Color(0xFFFF8A65), Color(0xFFFFB74D))
 private val BRIGHT = listOf(Color(0xFF80DEEA), Color(0xFFF48FB1), Color(0xFFFFF176), Color(0xFFB39DDB), Color(0xFFA5D6A7))
 
 /** Bursts of sparks, two at a time, slightly out of step. */
-private fun DrawScope.drawFireworks(t: Float, strength: Float, warm: Boolean) {
+private fun DrawScope.drawFireworks(t: Float, strength: Float) {
     val period = 2.8f
     for (lane in 0..1) {
         val lt = t + lane * period / 2f
@@ -537,8 +479,7 @@ private fun DrawScope.drawFireworks(t: Float, strength: Float, warm: Boolean) {
         val p = (lt - k * period) / period
         val r = Random(k * 2 + lane)
         val center = Offset(size.width * (0.15f + 0.7f * r.nextFloat()), size.height * (0.15f + 0.3f * r.nextFloat()))
-        val colors = if (warm) WARM else BRIGHT
-        val color = colors[r.nextInt(colors.size)]
+        val color = BRIGHT[r.nextInt(BRIGHT.size)]
         val ease = 1f - (1f - p) * (1f - p)
         val radius = (46f + 30f * r.nextFloat()).dp.toPx() * ease
         val fall = 26.dp.toPx() * p * p
@@ -550,19 +491,5 @@ private fun DrawScope.drawFireworks(t: Float, strength: Float, warm: Boolean) {
             drawCircle(color.copy(alpha = alpha), 1.8.dp.toPx(), c)
             drawCircle(color.copy(alpha = alpha * 0.25f), 4.5.dp.toPx(), c)
         }
-    }
-}
-
-/** Valentine's Day: hearts floating up. */
-private fun DrawScope.drawHearts(seeds: Seeds, t: Float) {
-    for (i in 0 until 12) {
-        val p = seeds.particles[seeds.particles.size - 12 + i]
-        val c = falling(p, -t, speed = 13f, sway = 12f)
-        val s = (9f + 6f * p[1]).dp.toPx()
-        val color = if (i % 3 == 0) Color(0xFFE57373) else Color(0xFFF48FB1)
-        withTransform({
-            translate(c.x, c.y)
-            scale(s, s, Offset.Zero)
-        }) { drawPath(seeds.heart, color.copy(alpha = 0.8f)) }
     }
 }

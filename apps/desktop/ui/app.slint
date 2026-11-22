@@ -940,8 +940,8 @@ component SettingsPage inherits Rectangle {
             if root.amb-enabled: SettingRow {
                 last: true;
                 icon: @image-url("icons/celebration.svg");
-                title: "Special days";
-                subtitle: "Lamps for Diwali, fireworks at New Year, hearts on Valentine's Day.";
+                title: "New Year";
+                subtitle: "Fireworks in the sky on 31 December and 1 January.";
                 checked <=> root.amb-special;
                 toggled => { root.ambience-changed(); }
             }

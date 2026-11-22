@@ -46,7 +46,7 @@ data class SettingsState(
     val season: Season? = null,
     /** Seasons follow the southern hemisphere (summer in December). */
     val southern: Boolean = false,
-    /** Lamps on Diwali, fireworks at New Year, hearts on Valentine's Day. */
+    /** Fireworks at New Year. */
     val specialDays: Boolean = true,
     /** Keep playing similar songs when the queue runs out. */
     val autoplay: Boolean = true,

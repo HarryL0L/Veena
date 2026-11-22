@@ -131,9 +131,7 @@ fn guess_southern() -> bool {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Occasion {
-    Diwali = 1,
     NewYear = 2,
-    Valentine = 3,
 }
 
 /// Everything Home needs to show the moment.
@@ -185,9 +183,7 @@ impl Moment {
 
     pub fn greeting(&self) -> &'static str {
         match self.occasion {
-            Some(Occasion::Diwali) => "Happy Diwali",
             Some(Occasion::NewYear) => "Happy New Year",
-            Some(Occasion::Valentine) => "Happy Valentine's Day",
             None => match self.hour {
                 h if (5.0..12.0).contains(&h) => "Good morning",
                 h if (12.0..17.0).contains(&h) => "Good afternoon",
@@ -199,9 +195,7 @@ impl Moment {
 
     pub fn line(&self) -> &'static str {
         match self.occasion {
-            Some(Occasion::Diwali) => return "Lamps lit, sweets shared, music on.",
             Some(Occasion::NewYear) => return "A fresh year of songs ahead.",
-            Some(Occasion::Valentine) => return "Play something for someone.",
             None => {}
         }
         match (self.day_part(), self.season) {
@@ -254,9 +248,7 @@ impl Moment {
             _ => ["Late night lo-fi", "Soft piano", "Ambient", "Sleep"],
         };
         let mut list: Vec<&str> = match self.occasion {
-            Some(Occasion::Diwali) => vec!["Diwali songs", "Festive dhol"],
             Some(Occasion::NewYear) => vec!["Party anthems", "Countdown hits"],
-            Some(Occasion::Valentine) => vec!["Love songs", "Romantic duets"],
             None => vec![
                 [
                     "Spring vibes",
@@ -320,28 +312,11 @@ pub fn season_of(date: Date, southern: bool) -> i32 {
     if southern { (north + 2) % 4 } else { north }
 }
 
-/// Lakshmi Puja dates (India); the lights stay up two days either side.
-const DIWALI: [(i16, i8, i8); 5] = [
-    (2026, 11, 8),
-    (2027, 10, 29),
-    (2028, 10, 17),
-    (2029, 11, 5),
-    (2030, 10, 26),
-];
-
+/// Days with their own decorations: only New Year, shared almost everywhere.
 pub fn occasion_of(date: Date) -> Option<Occasion> {
-    let diwali = DIWALI
-        .iter()
-        .any(|&(y, m, d)| Date::new(y, m, d).is_ok_and(|day| (date - day).get_days().abs() <= 2));
-    if diwali {
-        Some(Occasion::Diwali)
-    } else if (date.month() == 12 && date.day() == 31) || (date.month() == 1 && date.day() == 1) {
-        Some(Occasion::NewYear)
-    } else if date.month() == 2 && date.day() == 14 {
-        Some(Occasion::Valentine)
-    } else {
-        None
-    }
+    let new_year =
+        (date.month() == 12 && date.day() == 31) || (date.month() == 1 && date.day() == 1);
+    new_year.then_some(Occasion::NewYear)
 }
 
 fn rgb(hex: u32) -> Color {
@@ -418,9 +393,9 @@ mod tests {
     #[test]
     fn special_days() {
         let d = |m, day| Date::new(2027, m, day).unwrap();
-        assert_eq!(occasion_of(d(10, 30)), Some(Occasion::Diwali));
+        assert_eq!(occasion_of(d(12, 31)), Some(Occasion::NewYear));
         assert_eq!(occasion_of(d(1, 1)), Some(Occasion::NewYear));
-        assert_eq!(occasion_of(d(2, 14)), Some(Occasion::Valentine));
+        assert_eq!(occasion_of(d(2, 14)), None);
         assert_eq!(occasion_of(d(3, 3)), None);
     }
 

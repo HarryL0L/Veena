@@ -280,9 +280,7 @@ private fun moodsFor(a: Ambience): List<String> {
         else -> listOf("Late night lo-fi", "Soft piano", "Ambient", "Sleep")
     }
     val extra = when (a.occasion) {
-        Occasion.DIWALI -> listOf("Diwali songs", "Festive dhol")
         Occasion.NEW_YEAR -> listOf("Party anthems", "Countdown hits")
-        Occasion.VALENTINE -> listOf("Love songs", "Romantic duets")
         null -> listOf(
             when (a.season) {
                 Season.SPRING -> "Spring vibes"

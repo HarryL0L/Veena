@@ -298,8 +298,8 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
                         SwitchItem(
                             index = i, count = n,
                             icon = R.drawable.ic_celebration,
-                            title = "Special days",
-                            subtitle = "Lamps for Diwali, fireworks at New Year, hearts on Valentine's Day.",
+                            title = "New Year",
+                            subtitle = "Fireworks in the sky on 31 December and 1 January.",
                             checked = settings.specialDays,
                             onChange = { on -> viewModel.updateSettings { it.copy(specialDays = on) } },
                         )

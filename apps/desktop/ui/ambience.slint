@@ -19,7 +19,7 @@ export struct SceneInfo {
     moon-alpha: float,
     // 0 spring, 1 summer, 2 autumn, 3 winter
     season: int,
-    // 0 none, 1 Diwali, 2 New Year, 3 Valentine's Day
+    // 0 none, 2 New Year
     occasion: int,
 }
 
@@ -230,30 +230,8 @@ export component AmbientScene inherits Rectangle {
         }
     }
 
-    // Diwali: two strings of twinkling lights across the top.
-    if info.occasion == 1: Rectangle {
-        for i in 60: Rectangle {
-            property <int> strand: i >= 30 ? 1 : 0;
-            property <float> f: (mod(i, 30) + 1.0) / 31.0;
-            property <length> top: self.strand == 0 ? 10px : 4px;
-            property <length> sag: self.strand == 0 ? 22px : 40px;
-            property <float> glow: 0.45 + 0.55 * (sin((root.t * 2.6 + i * 1.7) * 1rad) + 1) / 2;
-            property <int> pick: mod(i + self.strand * 2, 5);
-            property <color> c: self.pick == 0 ? #ffd54f : self.pick == 1 ? #ff8a65 : self.pick == 2 ? #f06292 : self.pick == 3 ? #ffb300 : #aed581;
-            x: root.width * self.f - 3px;
-            y: self.top + self.sag * 4 * self.f * (1 - self.f) + 1px;
-            width: 6px;
-            height: 6px;
-            border-radius: 3px;
-            background: self.c;
-            drop-shadow-blur: 8px;
-            drop-shadow-color: self.c;
-            opacity: 0.6 + 0.4 * self.glow;
-        }
-    }
-
-    // Fireworks at New Year, and on Diwali nights.
-    if info.occasion == 2 || (info.occasion == 1 && info.night > 0.4): Rectangle {
+    // Fireworks at New Year.
+    if info.occasion == 2: Rectangle {
         for s in 44: Rectangle {
             property <int> lane: s >= 22 ? 1 : 0;
             property <float> lt: root.t + self.lane * 1.4;
@@ -264,10 +242,7 @@ export component AmbientScene inherits Rectangle {
             property <float> a: mod(s, 22) / 22.0 * 6.283 + Rand.hash(self.seed + s) * 0.2;
             property <length> radius: (46 + 30 * Rand.hash(self.seed * 1.7)) * 1px * self.ease;
             property <float> pick: Rand.hash(self.seed * 9.7);
-            property <bool> warm: root.info.occasion == 1;
-            property <color> c: self.warm
-                ? (self.pick < 0.33 ? #ffd54f : self.pick < 0.66 ? #ff8a65 : #ffb74d)
-                : (self.pick < 0.25 ? #80deea : self.pick < 0.5 ? #f48fb1 : self.pick < 0.75 ? #fff176 : #b39ddb);
+            property <color> c: self.pick < 0.25 ? #80deea : self.pick < 0.5 ? #f48fb1 : self.pick < 0.75 ? #fff176 : #b39ddb;
             x: (0.15 + 0.7 * Rand.hash(self.seed * 7.1)) * root.width + cos(self.a * 1rad) * self.radius - 2px;
             y: (0.15 + 0.3 * Rand.hash(self.seed * 3.3)) * root.height + sin(self.a * 1rad) * self.radius + 26px * self.p * self.p - 2px;
             width: 4px;
@@ -276,30 +251,7 @@ export component AmbientScene inherits Rectangle {
             background: self.c;
             drop-shadow-blur: 6px;
             drop-shadow-color: self.c;
-            opacity: (root.info.occasion == 2 ? 0.5 + root.info.night / 2 : root.info.night) * (1 - self.p);
-        }
-    }
-
-    // Valentine's Day: hearts floating up.
-    if info.occasion == 3: Rectangle {
-        for i in 12: Faller {
-            n: i + 40;
-            t: -root.t;
-            area-width: root.width;
-            area-height: root.height;
-            speed: 13;
-            sway: 12;
-            width: (12 + 8 * Rand.hash(i + 41.0)) * 1px;
-            height: self.width;
-            Path {
-                width: 100%;
-                height: 100%;
-                viewbox-width: 100;
-                viewbox-height: 100;
-                commands: "M 50 88 C 8 58 12 12 50 34 C 88 12 92 58 50 88 Z";
-                fill: mod(i, 3) == 0 ? #e57373 : #f48fb1;
-                opacity: 0.8;
-            }
+            opacity: (0.5 + root.info.night / 2) * (1 - self.p);
         }
     }
 
