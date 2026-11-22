@@ -1031,13 +1031,18 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
 
-    struct Collect(Mutex<mpsc::Sender<PlayerState>>);
+    /// States as they arrive; `None` means the machine has no audio output.
+    struct Collect(Mutex<mpsc::Sender<Option<PlayerState>>>);
 
     impl PlayerListener for Collect {
         fn on_state(&self, state: PlayerState) {
-            let _ = self.0.lock().unwrap().send(state);
+            let _ = self.0.lock().unwrap().send(Some(state));
         }
         fn on_error(&self, message: String) {
+            if message.contains("no audio output") {
+                let _ = self.0.lock().unwrap().send(None);
+                return;
+            }
             panic!("unexpected error: {message}");
         }
     }
@@ -1134,6 +1139,12 @@ mod tests {
 
         let mut saw_playing = false;
         while let Ok(state) = rx.recv_timeout(Duration::from_secs(10)) {
+            let Some(state) = state else {
+                // No sound device here (e.g. CI without an ALSA setup).
+                eprintln!("skipping: no audio output");
+                let _ = std::fs::remove_dir_all(&dir);
+                return;
+            };
             assert_eq!(state.queue, vec![track.clone()]);
             saw_playing |= state.state == PlayState::Playing;
             if saw_playing && state.state == PlayState::Stopped {
