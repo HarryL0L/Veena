@@ -799,9 +799,12 @@ fn friendly(message: &str) -> String {
 
 // ---------------------------------------------------------------- Screenshots
 
-/// `--screenshot FILE [--search QUERY] [--videos] [--play N] [--page N] [--size WxH] [--wait SECONDS]`:
-/// drive the app without a person and save a picture of the window. Used to
-/// show the app from a machine without a screen.
+/// `--screenshot FILE [--search QUERY] [--videos] [--play N] [--play-recent N]
+/// [--keep-playing] [--seek SECONDS] [--page N] [--size WxH] [--wait SECONDS]
+/// [--frames N --interval MS] [--expand-lyrics-at FRAME,FRAME…]`:
+/// drive the app without a person and save pictures of the window. Used to
+/// show the app from a machine without a screen; several frames make a
+/// recording.
 #[derive(Clone, Default)]
 struct Options {
     screenshot: Option<PathBuf>,
@@ -812,6 +815,18 @@ struct Options {
     wait: u64,
     /// Window size for the picture, e.g. 1360x1500.
     size: Option<(u32, u32)>,
+    /// Play this entry of Recently played instead of a search result.
+    play_recent: Option<i32>,
+    /// Leave the song playing (by default it pauses, for a still picture).
+    keep_playing: bool,
+    seek: Option<u64>,
+    frames: u32,
+    interval_ms: u64,
+    /// Press the lyrics' expand button when these frames are taken.
+    expand_lyrics_at: Vec<u32>,
+    /// Move the (paused) song this many milliseconds forward per frame, for
+    /// recordings on machines without a real sound device.
+    step_ms: Option<u64>,
 }
 
 impl Options {
@@ -834,11 +849,40 @@ impl Options {
                         Some((w.parse().ok()?, h.parse().ok()?))
                     })
                 }
+                "--play-recent" => options.play_recent = args.next().and_then(|n| n.parse().ok()),
+                "--keep-playing" => options.keep_playing = true,
+                "--seek" => options.seek = args.next().and_then(|n| n.parse().ok()),
+                "--frames" => {
+                    options.frames = args.next().and_then(|n| n.parse().ok()).unwrap_or(1)
+                }
+                "--interval" => {
+                    options.interval_ms = args.next().and_then(|n| n.parse().ok()).unwrap_or(250)
+                }
+                "--step-ms" => options.step_ms = args.next().and_then(|n| n.parse().ok()),
+                "--expand-lyrics-at" => {
+                    options.expand_lyrics_at = args
+                        .next()
+                        .map(|list| list.split(',').filter_map(|n| n.parse().ok()).collect())
+                        .unwrap_or_default()
+                }
                 "--wait" => options.wait = args.next().and_then(|n| n.parse().ok()).unwrap_or(8),
                 _ => {}
             }
         }
         options
+    }
+}
+
+fn snapshot(w: &AppWindow, file: &Path) {
+    match w.window().take_snapshot() {
+        Ok(shot) => {
+            let picture =
+                image::RgbaImage::from_raw(shot.width(), shot.height(), shot.as_bytes().to_vec());
+            if let Some(Err(e)) = picture.map(|p| p.save(file)) {
+                eprintln!("could not save the picture: {e}");
+            }
+        }
+        Err(e) => eprintln!("could not take a picture: {e}"),
     }
 }
 
@@ -862,37 +906,65 @@ fn run_screenshot(window: &AppWindow, file: PathBuf, options: Options) {
         let page = options.page;
         let weak2 = weak.clone();
         // Give the search time to finish before playing.
+        let (play_recent, keep_playing, seek) =
+            (options.play_recent, options.keep_playing, options.seek);
         slint::Timer::single_shot(Duration::from_secs(6), move || {
             if let Some(i) = play_at {
-                PAUSE_ON_START.with(|p| p.set(true));
+                PAUSE_ON_START.with(|p| p.set(!keep_playing));
                 with_ui(|ui| play(ui, ui.list(0), i));
+            }
+            if let Some(i) = play_recent {
+                PAUSE_ON_START.with(|p| p.set(!keep_playing));
+                with_ui(|ui| play(ui, ui.list(1), i));
+            }
+            if let Some(secs) = seek {
+                slint::Timer::single_shot(Duration::from_secs(2), move || {
+                    with_ui(|ui| background(&ui.veena, move |v| v.seek(secs * 1000)));
+                });
             }
             let weak3 = weak2.clone();
             slint::Timer::single_shot(Duration::from_secs(options.wait), move || {
                 if let (Some(w), Some(p)) = (weak3.upgrade(), page) {
                     w.set_page(p);
                 }
-                let weak4 = weak3.clone();
-                let file = file.clone();
-                slint::Timer::single_shot(Duration::from_millis(800), move || {
-                    if let Some(w) = weak4.upgrade() {
-                        match w.window().take_snapshot() {
-                            Ok(shot) => {
-                                let picture = image::RgbaImage::from_raw(
-                                    shot.width(),
-                                    shot.height(),
-                                    shot.as_bytes().to_vec(),
-                                );
-                                match picture.map(|p| p.save(&file)) {
-                                    Some(Ok(())) => eprintln!("saved {}", file.display()),
-                                    other => eprintln!("could not save the picture: {other:?}"),
-                                }
+                let frames = options.frames.max(1);
+                let interval = options.interval_ms.max(50);
+                let expand_at = options.expand_lyrics_at.clone();
+                let (step, start) = (options.step_ms, options.seek.unwrap_or(0) * 1000);
+                for n in 0..frames {
+                    let weak4 = weak3.clone();
+                    let press = expand_at.contains(&n);
+                    // Several frames are numbered: shot-000.png, shot-001.png...
+                    let file = if frames == 1 {
+                        file.clone()
+                    } else {
+                        file.with_file_name(format!(
+                            "{}-{n:03}.png",
+                            file.file_stem().unwrap_or_default().to_string_lossy()
+                        ))
+                    };
+                    let last = n + 1 == frames;
+                    let delay = Duration::from_millis(800 + interval * n as u64);
+                    slint::Timer::single_shot(delay, move || {
+                        if let Some(w) = weak4.upgrade() {
+                            if press {
+                                w.set_lyrics_expanded(!w.get_lyrics_expanded());
                             }
-                            Err(e) => eprintln!("could not take a picture: {e}"),
+                            if let Some(step) = step {
+                                let at = start + step * n as u64;
+                                with_ui(|ui| background(&ui.veena, move |v| v.seek(at)));
+                            }
+                            // A picture right after a press would freeze the window
+                            // through the animation; recordings capture it instead.
+                            if !press {
+                                snapshot(&w, &file);
+                            }
                         }
-                    }
-                    let _ = slint::quit_event_loop();
-                });
+                        if last {
+                            let _ = slint::quit_event_loop();
+                        }
+                    });
+                }
             });
         });
     });

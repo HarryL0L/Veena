@@ -1180,48 +1180,125 @@ component SidePanel inherits Rectangle {
             wrap: word-wrap;
         }
     }
+    // Something on: the cover sized to the panel's height, and lyrics in
+    // the rest. On short windows (high display scaling, small screens) the
+    // cover shrinks, then becomes a small row beside the title, so the
+    // lyrics always show. Switching between the two is one smooth motion:
+    // the cover shrinks into the thumbnail, the title slides beside it and
+    // the lyrics card grows into the space.
+    in-out property <bool> lyrics-expanded;
+    property <length> inner: root.width - 48px;
+    property <length> big-art: min(312px, root.height - 48px - 52px - 28px - 220px);
+    // Expanding only counts while there are lyrics: a next song without any
+    // brings the cover back (and its button) instead of a dead end.
+    property <bool> compact: (root.lyrics-expanded && root.lyrics.length > 0) || self.big-art < 150px;
+    // 0: big cover, 1: compact row; everything below moves with it.
+    property <float> t: root.compact ? 1 : 0;
+    animate t { duration: 320ms; easing: ease-in-out; }
+    property <length> art: root.big-art * (1 - root.t) + 64px * root.t;
+    property <length> art-x: 24px + (root.inner - root.big-art) / 2 * (1 - root.t);
+    // The title: under the cover, or beside the thumbnail.
+    // Follows the cover's real edge while it shrinks, so they never overlap.
+    property <length> title-x: 24px * (1 - root.t) + (root.art-x + root.art + 12px) * root.t;
+    property <length> title-y: (24px + root.art + 14px) * (1 - root.t) + (24px + root.art / 2 - 26px) * root.t;
+    // The title and heart fade out mid-way and back in at their new place,
+    // so they never cross the moving cover.
+    property <float> title-fade: max(0, min(1, (abs(root.t - 0.5) - 0.15) / 0.35));
+    property <length> card-y: (24px + root.big-art + 14px + 52px + 14px) * (1 - root.t) + (24px + 64px + 14px) * root.t;
+    if root.has-song: Artwork {
+        x: root.art-x;
+        y: 24px;
+        width: root.art;
+        height: root.art;
+        art: root.song.art;
+        corner: 28px * (1 - root.t) + 16px * root.t;
+        drop-shadow-blur: 24px * (1 - root.t);
+        drop-shadow-color: #00000066;
+        drop-shadow-offset-y: 8px * (1 - root.t);
+    }
     if root.has-song: VerticalLayout {
-        padding: 24px;
-        spacing: 14px;
-        Artwork {
-            art: root.song.art;
-            width: 312px;
-            height: 312px;
-            corner: 28px;
-            drop-shadow-blur: 24px;
-            drop-shadow-color: #00000066;
-            drop-shadow-offset-y: 8px;
-        }
-        HorizontalLayout {
-            VerticalLayout {
-                horizontal-stretch: 1;
-                Text { text: root.song.title; color: Theme.on-surface; font-size: 20px; font-weight: 800; overflow: elide; }
-                Text { text: root.song.artist; color: Theme.muted; overflow: elide; }
-            }
-            IconButton {
-                y: (parent.height - self.height) / 2;
-                icon: root.song.liked ? @image-url("icons/favorite.svg") : @image-url("icons/favorite_border.svg");
-                tint: root.song.liked ? Theme.accent : Theme.on-surface;
-                clicked => { root.like(); }
-            }
-        }
-        Rectangle {
-            border-radius: 24px;
-            background: Theme.accent-container.transparentize(0.55);
-            VerticalLayout {
-                padding: 20px;
-                spacing: 8px;
-                Text { text: "Lyrics"; color: Theme.on-surface; font-weight: 700; }
-                if root.lyrics.length == 0: Text { text: root.lyrics-note; color: Theme.muted; wrap: word-wrap; }
-                for line in root.lyrics: Text {
-                    text: line.text;
-                    wrap: word-wrap;
-                    font-size: line.state == 0 ? 20px : 15px;
-                    font-weight: line.state == 0 ? 800 : 600;
-                    color: line.state == 0 ? Theme.accent : line.state < 0 ? Theme.on-surface.transparentize(0.4) : Theme.on-surface.transparentize(0.65);
-                    animate font-size, color { duration: 250ms; easing: ease-out; }
+        x: root.title-x;
+        y: root.title-y;
+        width: root.width - self.x - 24px - 44px;
+        height: 52px;
+        alignment: center;
+        opacity: root.title-fade;
+        Text { text: root.song.title; color: Theme.on-surface; font-size: 20px - 3px * root.t; font-weight: 800; overflow: elide; }
+        Text { text: root.song.artist; color: Theme.muted; overflow: elide; }
+    }
+    if root.has-song: IconButton {
+        opacity: root.title-fade;
+        x: root.width - 24px - self.width;
+        y: root.title-y + (52px - self.height) / 2;
+        icon: root.song.liked ? @image-url("icons/favorite.svg") : @image-url("icons/favorite_border.svg");
+        tint: root.song.liked ? Theme.accent : Theme.on-surface;
+        clicked => { root.like(); }
+    }
+    if root.has-song: Rectangle {
+        // A new song starts at the top of its lyrics.
+        property <string> track: root.song.title + "\n" + root.song.artist;
+        changed track => { lyrics-scroll.content-y = 0; }
+        x: 24px;
+        y: root.card-y;
+        width: root.inner;
+        height: root.height - root.card-y - 24px;
+        border-radius: 24px;
+        clip: true;
+        background: Theme.accent-container.transparentize(0.55);
+        VerticalLayout {
+            padding: 20px;
+            padding-top: 12px;
+            padding-bottom: 0;
+            spacing: 4px;
+            HorizontalLayout {
+                height: 40px;
+                Text { text: "Lyrics"; color: Theme.on-surface; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                // Lyrics over the cover for full-height reading, and back.
+                if root.lyrics.length > 0: IconButton {
+                    y: (parent.height - self.height) / 2;
+                    // Up: lyrics take over the panel. Down: the cover comes back.
+                    icon: root.lyrics-expanded ? @image-url("icons/expand_more.svg") : @image-url("icons/expand_less.svg");
+                    tint: Theme.on-surface;
+                    clicked => { root.lyrics-expanded = !root.lyrics-expanded; }
                 }
-                Rectangle { }
+            }
+            if root.lyrics.length == 0: Text { text: root.lyrics-note; color: Theme.muted; wrap: word-wrap; }
+            // Scrolls on its own and glides to the line being sung. The
+            // box takes its size from the card, so the list can't push it.
+            Rectangle {
+                vertical-stretch: 1;
+                lyrics-scroll := Flickable {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    content-width: self.width;
+                    content-height: lyric-lines.preferred-height;
+                    animate content-y { duration: 450ms; easing: ease-in-out; }
+                    lyric-lines := VerticalLayout {
+                        width: lyrics-scroll.width;
+                        spacing: 8px;
+                        // Room below the last line, so it can reach the reading spot too.
+                        padding-bottom: 240px;
+                        for line in root.lyrics: Text {
+                            property <int> sung: line.state;
+                            text: line.text;
+                            wrap: word-wrap;
+                            font-size: line.state == 0 ? 20px : 15px;
+                            font-weight: line.state == 0 ? 800 : 600;
+                            color: line.state == 0 ? Theme.accent : line.state < 0 ? Theme.on-surface.transparentize(0.4) : Theme.on-surface.transparentize(0.65);
+                            animate font-size, color { duration: 250ms; easing: ease-out; }
+                            changed sung => { self.follow(); }
+                            // Lyrics that arrive mid-song start at the current line.
+                            init => { self.follow(); }
+                            function follow() {
+                                if (self.sung == 0) {
+                                    lyrics-scroll.content-y = min(0px, max(lyrics-scroll.height - lyric-lines.preferred-height, lyrics-scroll.height * 0.3 - self.y));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1384,6 +1461,7 @@ export component AppWindow inherits Window {
     in-out property <bool> amb-southern;
     in-out property <bool> amb-special: true;
     in-out property <bool> autoplay: true;
+    in-out property <bool> lyrics-expanded;
     in-out property <bool> panel-open: true;
     in-out property <int> search-focus;
 
@@ -1547,6 +1625,7 @@ export component AppWindow inherits Window {
                     recent: root.recent;
                     liked-count: root.liked.length;
                     moods: root.moods;
+                    lyrics-expanded <=> root.lyrics-expanded;
                     like => { root.like-now(); }
                     resume => { root.song-action(1, 0, SongAction.play); }
                     shuffle-liked => { root.shuffle-liked(); }
