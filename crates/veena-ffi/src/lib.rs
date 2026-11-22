@@ -925,9 +925,10 @@ fn init_logging() {
 /// Where signed brick updates are published (a GitHub release).
 const BRICK_UPDATE_URL: &str =
     "https://github.com/HarryL0L/Veena-music/releases/download/bricks/manifest.json";
-/// The public key brick updates must be signed with. Empty until the
-/// publishing key is set up; then updates are switched on.
-const BRICK_UPDATE_KEY: &str = "";
+/// The public key brick updates must be signed with (the matching secret is
+/// the `VEENA_BRICK_KEY` repository secret). Also published as
+/// `public-key.txt` in the bricks release.
+const BRICK_UPDATE_KEY: &str = "P3fIAWB06dnkt3ciFLuTLKE6Y4wDaM+kgvcTMcbrtZk=";
 
 /// The address apps check for brick updates.
 #[uniffi::export]
