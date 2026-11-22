@@ -74,7 +74,9 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
-    /// Open the default output device and start the engine.
+    /// Start the engine and open the default output device. Without a
+    /// working output (no sound device yet, or the sound server still
+    /// starting) the engine starts anyway and tries again at each song.
     pub fn new(on_event: impl Fn(AudioEvent) + Send + 'static) -> Result<Self, AudioError> {
         let (commands, receiver) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -88,14 +90,14 @@ impl AudioEngine {
                 let output = match open_output(broken.clone()) {
                     Ok(mut output) => {
                         output.log_on_drop(false);
-                        let _ = ready_tx.send(Ok(()));
-                        output
+                        Some(output)
                     }
                     Err(e) => {
-                        let _ = ready_tx.send(Err(e));
-                        return;
+                        log::warn!(target: "veena_audio", "no audio output yet: {e}");
+                        None
                     }
                 };
+                let _ = ready_tx.send(Ok::<(), AudioError>(()));
                 Worker::new(output, broken, loopback, Box::new(on_event)).run(receiver);
             })?;
 
@@ -215,7 +217,8 @@ fn open_platform_output(
 
 /// State owned by the audio thread.
 struct Worker {
-    output: OutputStream,
+    /// None until an output could be opened.
+    output: Option<OutputStream>,
     /// Set when the system stops the output stream.
     broken: Arc<AtomicBool>,
     /// What is loaded, to start it again on a new output.
@@ -233,7 +236,7 @@ struct Worker {
 
 impl Worker {
     fn new(
-        output: OutputStream,
+        output: Option<OutputStream>,
         broken: Arc<AtomicBool>,
         loopback: mpsc::Sender<Command>,
         on_event: Box<dyn Fn(AudioEvent) + Send>,
@@ -299,7 +302,15 @@ impl Worker {
                 match result {
                     Ok(decoder) => {
                         self.duration = decoder.total_duration();
-                        let sink = Sink::connect_new(self.output.mixer());
+                        let Some(mixer) = self.mixer() else {
+                            self.emit(AudioEvent::Error(
+                                "no audio output: check that a speaker or headphones are available"
+                                    .into(),
+                            ));
+                            self.set_state(PlaybackState::Stopped);
+                            return;
+                        };
+                        let sink = Sink::connect_new(&mixer);
                         sink.set_volume(self.volume);
                         if !autoplay {
                             sink.pause();
@@ -330,7 +341,8 @@ impl Worker {
                 }
                 match result {
                     Ok(decoder) => {
-                        let sink = Sink::connect_new(self.output.mixer());
+                        let Some(mixer) = self.mixer() else { return };
+                        let sink = Sink::connect_new(&mixer);
                         sink.set_volume(self.volume);
                         sink.append(decoder);
                         if let Err(e) = sink.try_seek(position) {
@@ -383,6 +395,21 @@ impl Worker {
         }
     }
 
+    /// The output's mixer, opening an output first if there is none yet.
+    fn mixer(&mut self) -> Option<rodio::mixer::Mixer> {
+        if self.output.is_none() {
+            match open_output(self.broken.clone()) {
+                Ok(mut output) => {
+                    output.log_on_drop(false);
+                    log::info!(target: "veena_audio", "opened the audio output");
+                    self.output = Some(output);
+                }
+                Err(e) => log::warn!(target: "veena_audio", "still no audio output: {e}"),
+            }
+        }
+        self.output.as_ref().map(|o| o.mixer().clone())
+    }
+
     /// The system stopped the output (a device was connected or removed):
     /// open a new one and carry on from the same place.
     fn reopen_output(&mut self) {
@@ -396,7 +423,7 @@ impl Worker {
         output.log_on_drop(false);
         log::info!(target: "veena_audio", "opened a new audio output");
         let old = self.sink.take();
-        self.output = output;
+        self.output = Some(output);
         let (Some(old), Some(stream)) = (old, self.current.clone()) else {
             return;
         };
