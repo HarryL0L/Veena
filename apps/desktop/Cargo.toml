@@ -2,6 +2,7 @@
 name = "veena-desktop"
 description = "Veena for Linux: the desktop app"
 version.workspace = true
+license.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false

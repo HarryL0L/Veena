@@ -21,7 +21,8 @@ unmaintained = "workspace"
 # Every exception needs a reason and should be revisited.
 ignore = []
 
-# Licenses must be permissive so Veena stays free to choose its own.
+# Veena itself is GPL-3.0-or-later. Dependencies must be permissive (or
+# GPL-compatible) so they can be combined with it.
 [licenses]
 version = 2
 confidence-threshold = 0.9

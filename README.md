@@ -218,6 +218,19 @@ See [SECURITY.md](SECURITY.md) to report a problem.
 
 ---
 
+## License
+
+Veena Music is free software: you can redistribute it and/or modify it under
+the terms of the [GNU General Public License](LICENSE), version 3 or (at your
+option) any later version. It comes with no warranty.
+
+Bricks you write yourself may use any license, as long as they only talk to
+Veena through the brick interface: see the
+[additional permission for bricks](LICENSE-BRICKS.md). The bricks in this
+repository are GPL like the rest of Veena.
+
+---
+
 ## Note
 
 Veena is an independent project, not affiliated with YouTube or Google.

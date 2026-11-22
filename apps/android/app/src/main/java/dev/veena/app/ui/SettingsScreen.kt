@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,6 +76,7 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
     var confirmClear by remember { mutableStateOf(false) }
     val bricks = remember { viewModel.bricks() }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+    val uriHandler = LocalUriHandler.current
 
     Column(Modifier.fillMaxSize().nestedScroll(scroll.nestedScrollConnection)) {
         LargeFlexibleTopAppBar(
@@ -332,10 +334,19 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
 
             group("About") {
                 listOf<@Composable () -> Unit>(
-                    { Item(index = 0, count = 2, icon = R.drawable.ic_info, title = "Veena Music", subtitle = "Version ${BuildConfig.VERSION_NAME}") },
+                    { Item(index = 0, count = 3, icon = R.drawable.ic_info, title = "Veena Music", subtitle = "Version ${BuildConfig.VERSION_NAME}") },
                     {
                         Item(
-                            index = 1, count = 2,
+                            index = 1, count = 3,
+                            icon = R.drawable.ic_license,
+                            title = "Licence",
+                            subtitle = "Free software under the GNU GPL, version 3 or later",
+                            onClick = { uriHandler.openUri("https://www.gnu.org/licenses/gpl-3.0.html") },
+                        )
+                    },
+                    {
+                        Item(
+                            index = 2, count = 3,
                             icon = R.drawable.ic_bug,
                             title = "Logs",
                             subtitle = "What Veena did recently, to copy when something goes wrong",
