@@ -210,7 +210,8 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
 
     if (showLogs) LogsSheet(onDismiss = { showLogs = false })
     addingToPlaylist?.let { track ->
-        AddToPlaylistDialog(
+        AddToPlaylistSheet(
+            track = track,
             playlists = viewModel.library.playlists.collectAsStateWithLifecycle().value,
             onPick = { id, name ->
                 viewModel.addToPlaylist(track, id, name)

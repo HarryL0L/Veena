@@ -290,43 +290,6 @@ fun CollectionScreen(collection: SongList, viewModel: PlayerViewModel, actions: 
     }
 }
 
-/** Pick a playlist for a song, or make a new one. */
-@Composable
-fun AddToPlaylistDialog(playlists: List<PlaylistInfo>, onPick: (id: String?, newName: String) -> Unit, onDismiss: () -> Unit) {
-    var creating by remember { mutableStateOf(playlists.isEmpty()) }
-    if (creating) {
-        NameDialog(title = "New playlist", confirm = "Create", onConfirm = { onPick(null, it) }, onDismiss = onDismiss)
-        return
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add to playlist") },
-        text = {
-            LazyColumn {
-                item {
-                    ListItem(
-                        onClick = { creating = true },
-                        leadingContent = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
-                    ) {
-                        Text("New playlist")
-                    }
-                }
-                items(playlists, key = { it.id }) { list ->
-                    ListItem(
-                        onClick = { onPick(list.id, "") },
-                        supportingContent = { Text(songs(list.count.toInt())) },
-                        leadingContent = { Icon(painterResource(R.drawable.ic_queue_music), contentDescription = null) },
-                    ) {
-                        Text(list.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
 @Composable
 private fun NameDialog(title: String, confirm: String, initial: String = "", onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(initial) }
