@@ -138,6 +138,8 @@ component NavItem inherits Rectangle {
 component Chip inherits Rectangle {
     in property <string> label;
     in property <bool> selected;
+    // Shown instead of the tick, for chips that are actions.
+    in property <image> icon;
     callback clicked;
     height: 36px;
     min-width: text.preferred-width + 32px;
@@ -150,8 +152,8 @@ component Chip inherits Rectangle {
         padding-right: 16px;
         spacing: 6px;
         alignment: center;
-        if root.selected: Icon {
-            source: @image-url("icons/check.svg");
+        if root.selected || root.icon.width > 0: Icon {
+            source: root.icon.width > 0 ? root.icon : @image-url("icons/check.svg");
             width: 18px;
             height: 18px;
             y: (parent.height - self.height) / 2;
@@ -204,7 +206,18 @@ component PlayingOverlay inherits Rectangle {
 // ---------------------------------------------------------------- Song tables
 
 /// What a song row can ask for (sent with the list and the row number).
-export enum SongAction { play, like, play-next, queue, remove-from-history }
+export enum SongAction {
+    play, like, play-next, queue, remove-from-history,
+    add-to-playlist, remove-from-playlist, remove-from-kept, remove-from-queue, move-up, move-down,
+}
+
+/// A playlist as the Library lists it.
+export struct PlaylistItem {
+    id: string,
+    name: string,
+    count: int,
+    art: image,
+}
 
 /// Column widths shared by the header and the rows.
 global Columns {
@@ -234,6 +247,10 @@ component TableHeader inherits Rectangle {
 component SongRow inherits Rectangle {
     in property <Song> song;
     in property <int> number;
+    in property <int> count;
+    // Which list the row is in, for its own actions:
+    // 1 recently played, 3 kept, 5 a playlist.
+    in property <int> list-kind;
     callback action(SongAction);
     height: 56px;
     border-radius: 12px;
@@ -245,6 +262,15 @@ component SongRow inherits Rectangle {
             MenuItem { title: "Add to queue"; activated => { root.action(SongAction.queue); } }
             MenuSeparator { }
             MenuItem { title: root.song.liked ? "Remove from liked" : "Like"; activated => { root.action(SongAction.like); } }
+            MenuItem { title: "Add to playlist…"; activated => { root.action(SongAction.add-to-playlist); } }
+            if root.list-kind == 5: MenuSeparator { }
+            if root.list-kind == 5: MenuItem { title: "Move up"; enabled: root.number > 1; activated => { root.action(SongAction.move-up); } }
+            if root.list-kind == 5: MenuItem { title: "Move down"; enabled: root.number < root.count; activated => { root.action(SongAction.move-down); } }
+            if root.list-kind == 5: MenuItem { title: "Remove from playlist"; activated => { root.action(SongAction.remove-from-playlist); } }
+            if root.list-kind == 3: MenuSeparator { }
+            if root.list-kind == 3: MenuItem { title: "Remove from this computer"; activated => { root.action(SongAction.remove-from-kept); } }
+            if root.list-kind == 1: MenuSeparator { }
+            if root.list-kind == 1: MenuItem { title: "Remove from recently played"; activated => { root.action(SongAction.remove-from-history); } }
         }
         area := TouchArea {
             mouse-cursor: pointer;
@@ -315,12 +341,15 @@ component SongRow inherits Rectangle {
 
 component SongTable inherits VerticalLayout {
     in property <[Song]> songs;
+    in property <int> list-kind;
     callback action(int, SongAction);
     TableHeader { }
     ListView {
         for song[i] in root.songs: SongRow {
             song: song;
             number: i + 1;
+            count: root.songs.length;
+            list-kind: root.list-kind;
             action(a) => { root.action(i, a); }
         }
     }
@@ -342,6 +371,7 @@ component SongCard inherits Rectangle {
             MenuItem { title: "Add to queue"; activated => { root.action(SongAction.queue); } }
             MenuSeparator { }
             MenuItem { title: root.song.liked ? "Remove from liked" : "Like"; activated => { root.action(SongAction.like); } }
+            MenuItem { title: "Add to playlist…"; activated => { root.action(SongAction.add-to-playlist); } }
             MenuItem { title: "Remove from recently played"; activated => { root.action(SongAction.remove-from-history); } }
         }
         area := TouchArea {
@@ -671,12 +701,114 @@ component SearchPage inherits Rectangle {
     }
 }
 
+/// A text box with a confirm button, for naming playlists.
+component NameField inherits Rectangle {
+    in property <string> placeholder;
+    in property <string> initial;
+    in property <string> button: "Create";
+    callback done(string);
+    callback cancel();
+    height: 52px;
+    border-radius: 26px;
+    background: Theme.surface-high;
+    border-width: 2px;
+    border-color: Theme.accent;
+    init => {
+        field.text = root.initial;
+        field.focus();
+        field.select-all();
+    }
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 8px;
+        spacing: 8px;
+        Rectangle {
+            horizontal-stretch: 1;
+            field := TextInput {
+                width: 100%;
+                font-size: 16px;
+                color: Theme.on-surface;
+                vertical-alignment: center;
+                single-line: true;
+                accepted => { if (self.text != "") { root.done(self.text); } }
+            }
+            Text {
+                visible: field.text == "";
+                x: 0;
+                text: root.placeholder;
+                font-size: 16px;
+                color: Theme.muted;
+                vertical-alignment: center;
+            }
+        }
+        Chip { y: (parent.height - self.height) / 2; label: root.button; selected: true; clicked => { if (field.text != "") { root.done(field.text); } } }
+        Chip { y: (parent.height - self.height) / 2; label: "Cancel"; clicked => { root.cancel(); } }
+    }
+}
+
+/// A playlist in a list: its cover, name and how many songs.
+component PlaylistRow inherits Rectangle {
+    in property <PlaylistItem> item;
+    callback clicked;
+    height: 72px;
+    border-radius: 16px;
+    background: area.has-hover ? Theme.surface-high : transparent;
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 14px;
+        Rectangle {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            clip: true;
+            background: Theme.accent-container;
+            if root.item.art.width == 0: Icon {
+                source: @image-url("icons/queue_music.svg");
+                tint: Theme.accent;
+                width: 26px;
+                height: 26px;
+            }
+            if root.item.art.width > 0: Image { source: root.item.art; width: 100%; height: 100%; image-fit: cover; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.item.name; color: Theme.on-surface; font-size: 16px; font-weight: 600; overflow: elide; }
+            Text { text: root.item.count == 1 ? "1 song" : root.item.count + " songs"; color: Theme.muted; font-size: 13px; }
+        }
+    }
+}
+
 component LibraryPage inherits Rectangle {
     in property <[Song]> liked;
+    in property <[Song]> recent;
     in property <[Song]> kept;
-    in property <int> list; // 0 liked, 1 kept
+    in property <[PlaylistItem]> playlists;
+    // The open playlist ("" when the list of playlists shows).
+    in property <string> open-id;
+    in property <string> open-name;
+    in property <[Song]> open-songs;
+    in property <int> list; // 0 liked, 1 recently played, 2 playlists, 3 kept
     callback show(int);
-    callback action(int, SongAction);
+    // A song row's request, with the app's list number.
+    callback action(int, int, SongAction);
+    callback open-playlist(string);
+    callback close-playlist();
+    callback new-playlist(string);
+    callback rename-playlist(string);
+    callback delete-playlist();
+    callback play-playlist(bool);
+    callback clear-history();
+    property <bool> naming;
+    property <bool> renaming;
+    property <bool> confirm-delete;
+    changed open-id => {
+        root.renaming = false;
+        root.confirm-delete = false;
+    }
     VerticalLayout {
         padding: 32px;
         spacing: 16px;
@@ -684,13 +816,109 @@ component LibraryPage inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
             alignment: start;
-            Chip { label: "Liked songs · " + root.liked.length; selected: root.list == 0; clicked => { root.show(0); } }
-            Chip { label: "Kept on this computer · " + root.kept.length; selected: root.list == 1; clicked => { root.show(1); } }
+            Chip { label: "Liked · " + root.liked.length; selected: root.list == 0; clicked => { root.show(0); } }
+            Chip { label: "Recently played · " + root.recent.length; selected: root.list == 1; clicked => { root.show(1); } }
+            Chip { label: "Playlists · " + root.playlists.length; selected: root.list == 2; clicked => { root.show(2); } }
+            Chip { label: "Kept on this computer · " + root.kept.length; selected: root.list == 3; clicked => { root.show(3); } }
         }
-        SongTable {
-            songs: root.list == 0 ? root.liked : root.kept;
-            action(i, a) => { root.action(i, a); }
+        if root.list == 0: SongTable {
+            songs: root.liked;
+            action(i, a) => { root.action(2, i, a); }
         }
+        if root.list == 1 && root.recent.length > 0: HorizontalLayout {
+            alignment: start;
+            Chip { label: "Clear history"; clicked => { root.clear-history(); } }
+        }
+        if root.list == 1: SongTable {
+            songs: root.recent;
+            list-kind: 1;
+            action(i, a) => { root.action(1, i, a); }
+        }
+        if root.list == 3: SongTable {
+            songs: root.kept;
+            list-kind: 3;
+            action(i, a) => { root.action(3, i, a); }
+        }
+        // The playlists.
+        if root.list == 2 && root.open-id == "" && !root.naming: HorizontalLayout {
+            alignment: start;
+            Chip { label: "New playlist"; icon: @image-url("icons/add.svg"); clicked => { root.naming = true; } }
+        }
+        if root.list == 2 && root.open-id == "" && root.naming: NameField {
+            placeholder: "Playlist name";
+            done(name) => {
+                root.naming = false;
+                root.new-playlist(name);
+            }
+            cancel => { root.naming = false; }
+        }
+        if root.list == 2 && root.open-id == "" && root.playlists.length == 0: Text {
+            text: "No playlists yet. Make one here, or right-click any song and choose Add to playlist.";
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        if root.list == 2 && root.open-id == "": ListView {
+            for item in root.playlists: PlaylistRow {
+                item: item;
+                clicked => { root.open-playlist(item.id); }
+            }
+        }
+        // One open playlist.
+        if root.list == 2 && root.open-id != "": HorizontalLayout {
+            spacing: 8px;
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("icons/arrow_back.svg");
+                clicked => { root.close-playlist(); }
+            }
+            if !root.renaming: Text {
+                text: root.open-name;
+                color: Theme.on-surface;
+                font-size: 26px;
+                font-weight: 800;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if root.renaming: NameField {
+                horizontal-stretch: 1;
+                initial: root.open-name;
+                button: "Rename";
+                done(name) => {
+                    root.renaming = false;
+                    root.rename-playlist(name);
+                }
+                cancel => { root.renaming = false; }
+            }
+        }
+        if root.list == 2 && root.open-id != "": HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            if root.open-songs.length > 0: Chip { label: "Play"; icon: @image-url("icons/play.svg"); selected: true; clicked => { root.play-playlist(false); } }
+            if root.open-songs.length > 0: Chip { label: "Shuffle"; icon: @image-url("icons/shuffle.svg"); clicked => { root.play-playlist(true); } }
+            Chip { label: "Rename"; clicked => { root.renaming = true; } }
+            if !root.confirm-delete: Chip { label: "Delete"; clicked => { root.confirm-delete = true; } }
+            if root.confirm-delete: Chip {
+                label: "Delete this playlist?";
+                selected: true;
+                clicked => {
+                    root.confirm-delete = false;
+                    root.delete-playlist();
+                }
+            }
+            if root.confirm-delete: Chip { label: "Keep it"; clicked => { root.confirm-delete = false; } }
+        }
+        if root.list == 2 && root.open-id != "" && root.open-songs.length == 0: Text {
+            text: "Empty for now. Right-click any song and choose Add to playlist.";
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        if root.list == 2 && root.open-id != "": SongTable {
+            songs: root.open-songs;
+            list-kind: 5;
+            action(i, a) => { root.action(5, i, a); }
+        }
+        if root.list == 2 && root.open-id == "" && root.playlists.length == 0: Rectangle { }
     }
 }
 
@@ -797,6 +1025,10 @@ component SettingsPage inherits Rectangle {
     in-out property <bool> keep-songs;
     in-out property <bool> offline;
     in property <string> usage;
+    in-out property <int> cache-limit;
+    callback set-cache-limit(int);
+    callback clear-kept();
+    property <bool> confirm-clear;
     in-out property <bool> amb-enabled;
     in-out property <int> amb-day;
     in-out property <int> amb-season;
@@ -844,6 +1076,17 @@ component SettingsPage inherits Rectangle {
                 checked <=> root.offline;
                 toggled(on) => { root.set-offline(on); }
             }
+            ChoiceRow {
+                icon: @image-url("icons/storage.svg");
+                title: "Space for kept songs";
+                note: root.usage + ". The oldest go first when it's full.";
+                options: ["512 MB", "1 GB", "2 GB", "4 GB", "8 GB"];
+                selected: root.cache-limit - 1;
+                picked(i) => {
+                    root.cache-limit = i + 1;
+                    root.set-cache-limit(i + 1);
+                }
+            }
             Rectangle {
                 height: 72px;
                 border-radius: 4px;
@@ -859,7 +1102,7 @@ component SettingsPage inherits Rectangle {
                         border-radius: 20px;
                         background: Theme.accent-container;
                         Icon {
-                            source: @image-url("icons/storage.svg");
+                            source: @image-url("icons/delete.svg");
                             tint: Theme.accent;
                             width: 22px;
                             height: 22px;
@@ -867,17 +1110,29 @@ component SettingsPage inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
+                        horizontal-stretch: 1;
                         Text {
-                            text: "Space for kept songs";
+                            text: "Remove all kept songs";
                             color: Theme.on-surface;
                             font-size: 16px;
                         }
                         Text {
-                            text: root.usage;
+                            text: "Frees the space. Liked songs and playlists stay.";
                             color: Theme.muted;
                             font-size: 13px;
                         }
                     }
+                    if !root.confirm-clear: Chip { y: (parent.height - self.height) / 2; label: "Remove all"; clicked => { root.confirm-clear = true; } }
+                    if root.confirm-clear: Chip {
+                        y: (parent.height - self.height) / 2;
+                        label: "Remove them?";
+                        selected: true;
+                        clicked => {
+                            root.confirm-clear = false;
+                            root.clear-kept();
+                        }
+                    }
+                    if root.confirm-clear: Chip { y: (parent.height - self.height) / 2; label: "Cancel"; clicked => { root.confirm-clear = false; } }
                 }
             }
             Text {
@@ -1318,6 +1573,150 @@ component SidePanel inherits Rectangle {
 }
 
 /// The player bar along the bottom, as on desktop music apps.
+/// A song in the queue.
+component QueueRow inherits Rectangle {
+    in property <Song> song;
+    in property <int> number;
+    in property <int> count;
+    in property <bool> current;
+    callback action(SongAction);
+    height: 64px;
+    border-radius: 16px;
+    background: root.current ? Theme.accent-container : area.has-hover ? Theme.surface-high : transparent;
+    ContextMenuArea {
+        Menu {
+            MenuItem { title: "Play"; activated => { root.action(SongAction.play); } }
+            MenuItem { title: root.song.liked ? "Remove from liked" : "Like"; activated => { root.action(SongAction.like); } }
+            MenuItem { title: "Add to playlist…"; activated => { root.action(SongAction.add-to-playlist); } }
+            MenuSeparator { }
+            MenuItem { title: "Move up"; enabled: root.number > 0; activated => { root.action(SongAction.move-up); } }
+            MenuItem { title: "Move down"; enabled: root.number < root.count - 1; activated => { root.action(SongAction.move-down); } }
+            MenuItem { title: "Remove from queue"; enabled: !root.current; activated => { root.action(SongAction.remove-from-queue); } }
+        }
+        area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.action(SongAction.play); }
+        }
+    }
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 12px;
+        Rectangle {
+            width: 48px;
+            height: 48px;
+            Artwork { art: root.song.art; width: 48px; height: 48px; corner: 12px; }
+            if root.current: PlayingOverlay { width: 48px; height: 48px; }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: root.song.title; color: root.current ? Theme.accent : Theme.on-surface; font-size: 14px; font-weight: 600; overflow: elide; }
+            Text { text: root.song.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
+        }
+        if area.has-hover && !root.current: IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: @image-url("icons/delete.svg");
+            size: 32px;
+            icon-size: 18px;
+            clicked => { root.action(SongAction.remove-from-queue); }
+        }
+    }
+}
+
+/// The right-hand panel's other side: what plays now and next.
+component QueuePanel inherits Rectangle {
+    in property <[Song]> queue;
+    in property <int> current;
+    callback action(int, SongAction);
+    callback show-now-playing();
+    width: 360px;
+    border-radius: Theme.radius;
+    clip: true;
+    background: Theme.background;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+        HorizontalLayout {
+            padding-left: 8px;
+            spacing: 8px;
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text { text: "Up next"; color: Theme.on-surface; font-size: 22px; font-weight: 800; }
+                Text {
+                    text: root.queue.length == 0 ? "Nothing queued" : (root.queue.length - root.current - 1) + " after this one";
+                    color: Theme.muted;
+                    font-size: 13px;
+                }
+            }
+            Chip { y: (parent.height - self.height) / 2; label: "Now playing"; clicked => { root.show-now-playing(); } }
+        }
+        if root.queue.length == 0: Text {
+            text: "Play something, or right-click a song and choose Add to queue.";
+            color: Theme.muted;
+            wrap: word-wrap;
+        }
+        ListView {
+            for song[i] in root.queue: QueueRow {
+                song: song;
+                number: i;
+                count: root.queue.length;
+                current: i == root.current;
+                action(a) => { root.action(i, a); }
+            }
+        }
+    }
+}
+
+/// Pick a playlist for a song, or start a new one with it.
+component PlaylistPicker inherits Rectangle {
+    in property <string> song-title;
+    in property <[PlaylistItem]> playlists;
+    callback picked(string);
+    callback create(string);
+    callback close();
+    property <bool> naming: root.playlists.length == 0;
+    background: #000000a0;
+    TouchArea { clicked => { root.close(); } }
+    Rectangle {
+        width: min(440px, root.width - 48px);
+        height: min(root.height - 80px, 180px + max(1, root.playlists.length) * 72px);
+        border-radius: 28px;
+        background: Theme.surface-container;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000080;
+        // Clicks inside stay inside.
+        TouchArea { }
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+            Text { text: "Add to playlist"; color: Theme.on-surface; font-size: 22px; font-weight: 800; }
+            Text { text: root.song-title; color: Theme.muted; font-size: 14px; overflow: elide; }
+            if !root.naming: HorizontalLayout {
+                alignment: start;
+                Chip { label: "New playlist"; icon: @image-url("icons/add.svg"); clicked => { root.naming = true; } }
+            }
+            if root.naming: NameField {
+                placeholder: "Playlist name";
+                done(name) => { root.create(name); }
+                cancel => {
+                    if (root.playlists.length == 0) {
+                        root.close();
+                    } else {
+                        root.naming = false;
+                    }
+                }
+            }
+            ListView {
+                for item in root.playlists: PlaylistRow {
+                    item: item;
+                    clicked => { root.picked(item.id); }
+                }
+            }
+        }
+    }
+}
+
 component PlayerBar inherits Rectangle {
     in property <Song> song;
     in property <bool> has-song;
@@ -1330,6 +1729,8 @@ component PlayerBar inherits Rectangle {
     in property <string> duration;
     in property <float> volume;
     in property <bool> panel-open;
+    // 0 now playing, 1 up next
+    in property <int> panel-mode;
     callback toggle();
     callback next();
     callback previous();
@@ -1339,6 +1740,7 @@ component PlayerBar inherits Rectangle {
     callback like();
     callback set-volume(float);
     callback toggle-panel();
+    callback toggle-queue();
     height: 92px;
     border-radius: Theme.radius;
     background: Theme.surface-container;
@@ -1416,10 +1818,17 @@ component PlayerBar inherits Rectangle {
             alignment: end;
             IconButton {
                 y: (parent.height - self.height) / 2;
-                icon: @image-url("icons/queue_music.svg");
-                fill: root.panel-open ? Theme.accent-container : transparent;
-                tint: root.panel-open ? Theme.accent : Theme.muted;
+                icon: @image-url("icons/library_music.svg");
+                fill: root.panel-open && root.panel-mode == 0 ? Theme.accent-container : transparent;
+                tint: root.panel-open && root.panel-mode == 0 ? Theme.accent : Theme.muted;
                 clicked => { root.toggle-panel(); }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("icons/queue_music.svg");
+                fill: root.panel-open && root.panel-mode == 1 ? Theme.accent-container : transparent;
+                tint: root.panel-open && root.panel-mode == 1 ? Theme.accent : Theme.muted;
+                clicked => { root.toggle-queue(); }
             }
             Icon { source: @image-url("icons/music_note.svg"); tint: Theme.muted; width: 20px; height: 20px; y: (parent.height - self.height) / 2; }
             SeekBar {
@@ -1449,6 +1858,8 @@ export component AppWindow inherits Window {
     in-out property <int> page; // 0 home, 1 search, 2 library, 3 settings
     in property <string> greeting: "Welcome back";
     in property <[Song]> recent;
+    // The whole history, for the Library (recent is only the latest few).
+    in property <[Song]> recent-all;
     in property <[Song]> liked;
     in property <[Song]> kept;
     in property <[Song]> results;
@@ -1456,6 +1867,18 @@ export component AppWindow inherits Window {
     in property <string> search-message;
     in-out property <bool> videos;
     in-out property <int> library-list;
+    in property <[PlaylistItem]> playlists;
+    in property <string> open-playlist-id;
+    in property <string> open-playlist-name;
+    in property <[Song]> open-playlist-songs;
+    in property <[Song]> queue;
+    in property <int> queue-current: -1;
+    // 0 now playing, 1 up next
+    in-out property <int> panel-mode;
+    // The song waiting for a playlist ("" when the picker is closed).
+    in property <string> picking-for;
+    // Index into 512 MB, 1, 2, 4, 8 GB.
+    in-out property <int> cache-limit: 1;
     in-out property <bool> keep-songs: true;
     in-out property <bool> offline;
     in property <string> usage;
@@ -1492,7 +1915,8 @@ export component AppWindow inherits Window {
     in property <string> lyrics-note: "No lyrics found for this song.";
 
     /// A song row's request. Lists: 0 search results, 1 recently played,
-    /// 2 liked, 3 kept on this computer.
+    /// 2 liked, 3 kept on this computer, 4 quick picks, 5 the open
+    /// playlist, 6 the queue.
     callback song-action(int, int, SongAction);
     callback search(string);
     callback show-videos(bool);
@@ -1510,6 +1934,18 @@ export component AppWindow inherits Window {
     callback ambience-changed();
     callback set-autoplay(bool);
     callback shuffle-liked();
+    callback open-playlist(string);
+    callback close-playlist();
+    callback new-playlist(string);
+    callback rename-playlist(string);
+    callback delete-playlist();
+    callback play-playlist(bool);
+    callback pick-playlist(string);
+    callback pick-new-playlist(string);
+    callback close-picker();
+    callback clear-history();
+    callback set-cache-limit(int);
+    callback clear-kept();
 
     // Keyboard shortcuts. Keys typed into the search field go there first.
     keys := FocusScope {
@@ -1602,15 +2038,30 @@ export component AppWindow inherits Window {
                     }
                     if root.page == 2: LibraryPage {
                         liked: root.liked;
+                        recent: root.recent-all;
                         kept: root.kept;
+                        playlists: root.playlists;
+                        open-id: root.open-playlist-id;
+                        open-name: root.open-playlist-name;
+                        open-songs: root.open-playlist-songs;
                         list: root.library-list;
                         show(l) => { root.library-list = l; }
-                        action(i, a) => { root.song-action(root.library-list == 0 ? 2 : 3, i, a); }
+                        action(l, i, a) => { root.song-action(l, i, a); }
+                        open-playlist(id) => { root.open-playlist(id); }
+                        close-playlist => { root.close-playlist(); }
+                        new-playlist(name) => { root.new-playlist(name); }
+                        rename-playlist(name) => { root.rename-playlist(name); }
+                        delete-playlist => { root.delete-playlist(); }
+                        play-playlist(s) => { root.play-playlist(s); }
+                        clear-history => { root.clear-history(); }
                     }
                     if root.page == 3: SettingsPage {
                         keep-songs <=> root.keep-songs;
                         offline <=> root.offline;
                         usage: root.usage;
+                        cache-limit <=> root.cache-limit;
+                        set-cache-limit(i) => { root.set-cache-limit(i); }
+                        clear-kept => { root.clear-kept(); }
                         amb-enabled <=> root.amb-enabled;
                         amb-day <=> root.amb-day;
                         amb-season <=> root.amb-season;
@@ -1627,7 +2078,13 @@ export component AppWindow inherits Window {
                 }
 
                 // Hidden on narrow windows so the page keeps its room.
-                if root.panel-open && root.width > 1180px: SidePanel {
+                if root.panel-open && root.panel-mode == 1 && root.width > 1180px: QueuePanel {
+                    queue: root.queue;
+                    current: root.queue-current;
+                    action(i, a) => { root.song-action(6, i, a); }
+                    show-now-playing => { root.panel-mode = 0; }
+                }
+                if root.panel-open && root.panel-mode == 0 && root.width > 1180px: SidePanel {
                     song: root.now;
                     has-song: root.has-song;
                     lyrics: root.lyrics;
@@ -1660,6 +2117,7 @@ export component AppWindow inherits Window {
                     duration: root.duration;
                     volume: root.volume;
                     panel-open: root.panel-open;
+                    panel-mode: root.panel-mode;
                     toggle => { root.toggle(); }
                     next => { root.next(); }
                     previous => { root.previous(); }
@@ -1668,9 +2126,25 @@ export component AppWindow inherits Window {
                     cycle-repeat => { root.cycle-repeat(); }
                     like => { root.like-now(); }
                     set-volume(v) => { root.set-volume(v); }
-                    toggle-panel => { root.panel-open = !root.panel-open; }
+                    toggle-panel => {
+                        root.panel-open = !(root.panel-open && root.panel-mode == 0);
+                        root.panel-mode = 0;
+                    }
+                    toggle-queue => {
+                        root.panel-open = !(root.panel-open && root.panel-mode == 1);
+                        root.panel-mode = 1;
+                    }
                 }
             }
         }
+    }
+    if root.picking-for != "": PlaylistPicker {
+        width: root.width;
+        height: root.height;
+        song-title: root.picking-for;
+        playlists: root.playlists;
+        picked(id) => { root.pick-playlist(id); }
+        create(name) => { root.pick-new-playlist(name); }
+        close => { root.close-picker(); }
     }
 }

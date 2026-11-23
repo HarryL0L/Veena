@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use slint::{Color, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
-use veena_ffi::{LyricsInfo, PlayState, PlayerListener, PlayerState, RepeatMode, TrackInfo, Veena};
+use veena_ffi::{
+    LyricsInfo, PlayState, PlayerListener, PlayerState, PlaylistInfo, RepeatMode, TrackInfo, Veena,
+};
 
 slint::include_modules!();
 
@@ -63,6 +65,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state: veena.state(),
         playing_key: None,
         lyrics: None,
+        playlists: veena.playlists(),
+        open_playlist: None,
+        playlist_tracks: Vec::new(),
+        picking: None,
+        queue_shown: None,
     }));
     UI.with(|cell| *cell.borrow_mut() = Some(ui.clone()));
     connect(&window, &ui);
@@ -112,6 +119,14 @@ pub(crate) struct Ui {
     state: PlayerState,
     playing_key: Option<String>,
     lyrics: Option<(String, LyricsInfo)>,
+    playlists: Vec<PlaylistInfo>,
+    /// The playlist open in the Library, and its songs.
+    open_playlist: Option<String>,
+    playlist_tracks: Vec<TrackInfo>,
+    /// The song waiting for "Add to playlist".
+    picking: Option<TrackInfo>,
+    /// What the queue panel shows, to rebuild it only when it changes.
+    queue_shown: Option<(Vec<String>, Option<u32>)>,
 }
 
 pub(crate) fn key(t: &TrackInfo) -> String {
@@ -132,6 +147,8 @@ impl Ui {
             1 => self.recent.clone(),
             2 => self.liked.clone(),
             4 => self.picks(),
+            5 => self.playlist_tracks.clone(),
+            6 => self.state.queue.clone(),
             _ => self.kept.clone(),
         }
     }
@@ -190,8 +207,29 @@ impl Ui {
         window.set_recent(model(
             &self.recent.iter().take(20).cloned().collect::<Vec<_>>(),
         ));
+        window.set_recent_all(model(&self.recent));
         window.set_liked(model(&self.liked));
         window.set_kept(model(&self.kept));
+        window.set_open_playlist_songs(model(&self.playlist_tracks));
+        window.set_playlists(ModelRc::new(VecModel::from(
+            self.playlists
+                .iter()
+                .map(|p| PlaylistItem {
+                    id: p.id.clone().into(),
+                    name: p.name.clone().into(),
+                    count: p.count as i32,
+                    art: art(p.artwork.as_deref()),
+                })
+                .collect::<Vec<_>>(),
+        )));
+        let open = self
+            .open_playlist
+            .as_ref()
+            .and_then(|id| self.playlists.iter().find(|p| &p.id == id));
+        window.set_open_playlist_id(open.map(|p| p.id.clone()).unwrap_or_default().into());
+        window.set_open_playlist_name(open.map(|p| p.name.clone()).unwrap_or_default().into());
+        window.set_queue(model(&self.state.queue));
+        window.set_queue_current(self.state.current.map_or(-1, |c| c as i32));
         // Quick picks: two rows of three, only once there are a few.
         let picks = self.picks();
         let (a, b) = if picks.len() >= 3 {
@@ -214,11 +252,31 @@ impl Ui {
         );
     }
 
+    /// Read playlists again after a change, and the open one's songs.
+    fn reload_playlists(&mut self) {
+        self.playlists = self.veena.playlists();
+        if let Some(id) = &self.open_playlist {
+            if self.playlists.iter().any(|p| &p.id == id) {
+                self.playlist_tracks = self.veena.playlist_tracks(id.clone());
+            } else {
+                self.open_playlist = None;
+                self.playlist_tracks.clear();
+            }
+        }
+        self.refresh_lists();
+    }
+
     fn on_state(&mut self, state: PlayerState) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
         self.state = state;
+        let shown = (
+            self.state.queue.iter().map(key).collect::<Vec<_>>(),
+            self.state.current,
+        );
+        let queue_changed = self.queue_shown.as_ref() != Some(&shown);
+        self.queue_shown = Some(shown);
         let current = self.current().cloned();
         let new_key = current.as_ref().map(key);
         let changed = new_key != self.playing_key;
@@ -264,6 +322,8 @@ impl Ui {
                     });
                 });
             }
+            self.refresh_lists();
+        } else if queue_changed {
             self.refresh_lists();
         }
         self.show_lyrics();
@@ -369,6 +429,10 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
     window.set_amb_special(settings.special_days);
     window.set_autoplay(settings.autoplay);
     ui.borrow().veena.set_autoplay(settings.autoplay);
+    window.set_cache_limit(settings.cache_limit);
+    ui.borrow()
+        .veena
+        .set_cache_limit_mb(cache_limit_mb(settings.cache_limit));
     show_moment(window);
     let weak = window.as_weak();
     let weak_autoplay = window.as_weak();
@@ -416,6 +480,9 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
                 SongAction::Play if list == 0 => background(&ui.veena, move |v| {
                     v.play_search_result(tracks, index.max(0) as u32)
                 }),
+                SongAction::Play if list == 6 => {
+                    background(&ui.veena, move |v| v.play_at(index.max(0) as u32))
+                }
                 SongAction::Play => play(ui, tracks, index),
                 SongAction::Like => toggle_like(ui, tracks.get(index as usize).cloned()),
                 SongAction::PlayNext => {
@@ -435,6 +502,47 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
                 SongAction::Queue => {
                     if let Some(t) = tracks.get(index as usize).cloned() {
                         background(&ui.veena, move |v| v.enqueue(vec![t]));
+                    }
+                }
+                SongAction::AddToPlaylist => {
+                    if let Some(t) = tracks.get(index as usize).cloned() {
+                        if let Some(w) = ui.window.upgrade() {
+                            w.set_picking_for(t.title.clone().into());
+                        }
+                        ui.picking = Some(t);
+                    }
+                }
+                SongAction::RemoveFromPlaylist => {
+                    if let Some(id) = ui.open_playlist.clone() {
+                        ui.veena.remove_from_playlist(id, index as u32);
+                        ui.reload_playlists();
+                    }
+                }
+                SongAction::RemoveFromKept => {
+                    if let Some(t) = tracks.get(index as usize).cloned() {
+                        ui.veena.remove_from_cache(t);
+                        ui.kept = ui.veena.cached_tracks();
+                        ui.refresh_lists();
+                    }
+                }
+                SongAction::RemoveFromQueue => {
+                    background(&ui.veena, move |v| v.remove(index as u32));
+                }
+                SongAction::MoveUp | SongAction::MoveDown => {
+                    let to = if action == SongAction::MoveUp {
+                        index - 1
+                    } else {
+                        index + 1
+                    };
+                    if index < 0 || to < 0 || to as usize >= tracks.len() {
+                        return;
+                    }
+                    let (from, to) = (index as u32, to as u32);
+                    if list == 6 {
+                        background(&ui.veena, move |v| v.move_track(from, to));
+                    } else if let Some(id) = ui.open_playlist.clone() {
+                        ui.veena.move_in_playlist(id, from, to);
+                        ui.reload_playlists();
                     }
                 }
             }
@@ -484,10 +592,7 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
                 return;
             }
             // A different song to start with each time.
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.subsec_nanos() as usize);
-            let start = (nanos % liked.len()) as u32;
+            let start = random_below(liked.len());
             background(&ui.veena, move |v| {
                 v.set_shuffle(true);
                 v.play(liked, start);
@@ -508,10 +613,136 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
             background(&ui.veena, move |v| v.set_volume(volume));
         })
     });
+    connect_library(window);
     let v = veena.clone();
     window.on_set_keep_songs(move |on| v.set_cache_enabled(on));
     let v = veena;
     window.on_set_offline(move |on| v.set_offline(on));
+}
+
+/// Playlists, history and kept songs.
+fn connect_library(window: &AppWindow) {
+    window.on_open_playlist(|id| {
+        with_ui(|ui| {
+            ui.open_playlist = Some(id.to_string());
+            ui.reload_playlists();
+        })
+    });
+    window.on_close_playlist(|| {
+        with_ui(|ui| {
+            ui.open_playlist = None;
+            ui.playlist_tracks.clear();
+            ui.refresh_lists();
+        })
+    });
+    window.on_new_playlist(|name| {
+        with_ui(|ui| {
+            let id = ui.veena.create_playlist(name.trim().to_string());
+            ui.open_playlist = Some(id);
+            ui.reload_playlists();
+        })
+    });
+    window.on_rename_playlist(|name| {
+        with_ui(|ui| {
+            if let Some(id) = ui.open_playlist.clone() {
+                ui.veena.rename_playlist(id, name.trim().to_string());
+                ui.reload_playlists();
+            }
+        })
+    });
+    window.on_delete_playlist(|| {
+        with_ui(|ui| {
+            if let Some(id) = ui.open_playlist.take() {
+                ui.veena.delete_playlist(id);
+                ui.reload_playlists();
+            }
+        })
+    });
+    window.on_play_playlist(|shuffle| {
+        with_ui(|ui| {
+            let tracks = ui.playlist_tracks.clone();
+            if tracks.is_empty() {
+                return;
+            }
+            let start = if shuffle {
+                random_below(tracks.len())
+            } else {
+                0
+            };
+            background(&ui.veena, move |v| {
+                v.set_shuffle(shuffle);
+                v.play(tracks, start);
+            });
+        })
+    });
+    window.on_pick_playlist(|id| {
+        with_ui(|ui| {
+            if let Some(t) = ui.picking.take() {
+                ui.veena.add_to_playlist(id.to_string(), t);
+            }
+            if let Some(w) = ui.window.upgrade() {
+                w.set_picking_for("".into());
+            }
+            ui.reload_playlists();
+        })
+    });
+    window.on_pick_new_playlist(|name| {
+        with_ui(|ui| {
+            let id = ui.veena.create_playlist(name.trim().to_string());
+            if let Some(t) = ui.picking.take() {
+                ui.veena.add_to_playlist(id, t);
+            }
+            if let Some(w) = ui.window.upgrade() {
+                w.set_picking_for("".into());
+            }
+            ui.reload_playlists();
+        })
+    });
+    window.on_close_picker(|| {
+        with_ui(|ui| {
+            ui.picking = None;
+            if let Some(w) = ui.window.upgrade() {
+                w.set_picking_for("".into());
+            }
+        })
+    });
+    window.on_clear_history(|| {
+        with_ui(|ui| {
+            ui.veena.clear_history();
+            ui.recent.clear();
+            ui.refresh_lists();
+        })
+    });
+    window.on_clear_kept(|| {
+        with_ui(|ui| {
+            ui.veena.clear_cache();
+            ui.kept.clear();
+            ui.refresh_lists();
+        })
+    });
+    window.on_set_cache_limit(|choice| {
+        with_ui(|ui| {
+            ui.veena.set_cache_limit_mb(cache_limit_mb(choice));
+            ui.kept = ui.veena.cached_tracks();
+            ui.refresh_lists();
+            if let Some(w) = ui.window.upgrade() {
+                ambience_settings(&w).save();
+            }
+        })
+    });
+}
+
+/// The space choices in Settings: 512 MB, 1, 2, 4 and 8 GB.
+fn cache_limit_mb(choice: i32) -> u32 {
+    512 << choice.clamp(0, 4)
+}
+
+/// A number below `n`, different each time (for where shuffle starts).
+fn random_below(n: usize) -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos() as usize);
+    (nanos % n.max(1)) as u32
 }
 
 fn ambience_settings(w: &AppWindow) -> AmbienceSettings {
@@ -523,6 +754,7 @@ fn ambience_settings(w: &AppWindow) -> AmbienceSettings {
         southern: w.get_amb_southern(),
         special_days: w.get_amb_special(),
         autoplay: w.get_autoplay(),
+        cache_limit: w.get_cache_limit(),
     }
 }
 
