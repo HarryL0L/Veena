@@ -680,13 +680,7 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
                     if index < 0 || to < 0 || to as usize >= tracks.len() {
                         return;
                     }
-                    let (from, to) = (index as u32, to as u32);
-                    if list == 6 {
-                        background(&ui.veena, move |v| v.move_track(from, to));
-                    } else if let Some(id) = ui.open_playlist.clone() {
-                        ui.veena.move_in_playlist(id, from, to);
-                        ui.reload_playlists();
-                    }
+                    reorder(ui, list, index as u32, to as u32);
                 }
             }
         })
@@ -763,6 +757,16 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
     window.on_set_offline(move |on| v.set_offline(on));
 }
 
+/// Move a song within the queue (list 6) or the open playlist (list 5).
+fn reorder(ui: &mut Ui, list: i32, from: u32, to: u32) {
+    if list == 6 {
+        background(&ui.veena, move |v| v.move_track(from, to));
+    } else if let Some(id) = ui.open_playlist.clone() {
+        ui.veena.move_in_playlist(id, from, to);
+        ui.reload_playlists();
+    }
+}
+
 /// The bricks for Settings: what each does, or why it failed. They load
 /// in the background at start, so this waits for them off the window's
 /// thread.
@@ -815,6 +819,13 @@ fn show_bricks(w: &AppWindow, plugins: Vec<veena_ffi::PluginInfo>) {
 
 /// Playlists, history and kept songs.
 fn connect_library(window: &AppWindow) {
+    window.on_reorder(|list, from, to| {
+        with_ui(|ui| {
+            if from >= 0 && to >= 0 {
+                reorder(ui, list, from as u32, to as u32);
+            }
+        })
+    });
     window.on_open_playlist(|id| {
         with_ui(|ui| {
             ui.open_playlist = Some(id.to_string());

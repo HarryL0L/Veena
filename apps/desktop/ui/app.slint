@@ -73,6 +73,7 @@ component IconButton inherits Rectangle {
     in property <color> tint: Theme.on-surface;
     in property <color> fill: transparent;
     in property <length> corner: self.size / 2;
+    out property <bool> hovered: area.has-hover;
     callback clicked;
     width: size;
     height: size;
@@ -263,6 +264,45 @@ component TableHeader inherits Rectangle {
     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.outline.transparentize(0.5); }
 }
 
+/// Grab to move a row up or down a list. Reports how far the pointer has
+/// gone since the press, while dragging and when let go.
+component DragHandle inherits Rectangle {
+    // Under the pointer or held, so its row keeps showing it.
+    out property <bool> active: grab.has-hover || grab.pressed;
+    callback moved(length);
+    callback dropped();
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
+    background: grab.pressed ? Theme.accent-container : grab.has-hover ? Theme.on-surface.transparentize(0.9) : transparent;
+    Icon {
+        source: @image-url("icons/drag_handle.svg");
+        tint: grab.pressed ? Theme.accent : Theme.muted;
+        width: 20px;
+        height: 20px;
+    }
+    grab := TouchArea {
+        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+        moved => {
+            if (self.pressed) {
+                root.moved(self.mouse-y - self.pressed-y);
+            }
+        }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
+                root.dropped();
+            }
+        }
+    }
+}
+
+/// Where a dragged row will land: a line along the row's top or bottom.
+component DropLine inherits Rectangle {
+    height: 3px;
+    border-radius: 1.5px;
+    background: Theme.accent;
+}
+
 component SongRow inherits Rectangle {
     in property <Song> song;
     in property <int> number;
@@ -270,10 +310,17 @@ component SongRow inherits Rectangle {
     // Which list the row is in, for its own actions:
     // 1 recently played, 3 kept, 5 a playlist.
     in property <int> list-kind;
+    // Dragging (playlists): this row is the one moving, or where it lands.
+    in property <bool> lifted;
+    in property <int> drop-line: -1;
     callback action(SongAction);
+    callback drag-moved(length);
+    callback drag-dropped();
     height: 56px;
     border-radius: 12px;
-    background: song.playing ? Theme.accent-container.transparentize(0.4) : area.has-hover ? Theme.surface-high : transparent;
+    background: root.lifted ? Theme.accent-container : song.playing ? Theme.accent-container.transparentize(0.4) : area.has-hover ? Theme.surface-high : transparent;
+    border-width: root.lifted ? 2px : 0;
+    border-color: Theme.accent;
     ContextMenuArea {
         Menu {
             MenuItem { title: "Play"; activated => { root.action(SongAction.play); } }
@@ -352,9 +399,35 @@ component SongRow inherits Rectangle {
                         clicked => { root.action(SongAction.like); }
                     }
                 }
-                Text { text: root.song.duration; width: Columns.duration; color: Theme.muted; horizontal-alignment: right; vertical-alignment: center; font-size: 13px; }
+                Rectangle {
+                    width: Columns.duration;
+                    // In a playlist, the length gives way to a handle for moving the song.
+                    property <bool> grabbing: root.list-kind == 5 && (area.has-hover || root.lifted || handle.active);
+                    if !self.grabbing: Text {
+                        width: 100%;
+                        height: 100%;
+                        text: root.song.duration;
+                        color: Theme.muted;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        font-size: 13px;
+                    }
+                    handle := DragHandle {
+                        visible: root.list-kind == 5;
+                        opacity: parent.grabbing ? 1 : 0;
+                        x: parent.width - self.width;
+                        y: (parent.height - self.height) / 2;
+                        moved(dy) => { root.drag-moved(dy); }
+                        dropped => { root.drag-dropped(); }
+                    }
+                }
             }
         }
+    }
+    if root.drop-line >= 0: DropLine {
+        x: 8px;
+        width: root.width - 16px;
+        y: root.drop-line == 0 ? -1px : root.height - 2px;
     }
 }
 
@@ -362,6 +435,10 @@ component SongTable inherits VerticalLayout {
     in property <[Song]> songs;
     in property <int> list-kind;
     callback action(int, SongAction);
+    // A song dragged from one place to another (playlists).
+    callback reorder(int, int);
+    property <int> drag-from: -1;
+    property <int> drag-to: -1;
     TableHeader { }
     ListView {
         for song[i] in root.songs: SongRow {
@@ -369,7 +446,20 @@ component SongTable inherits VerticalLayout {
             number: i + 1;
             count: root.songs.length;
             list-kind: root.list-kind;
+            lifted: root.drag-from == i;
+            drop-line: root.drag-from >= 0 && root.drag-to == i && i != root.drag-from ? (i < root.drag-from ? 0 : 1) : -1;
             action(a) => { root.action(i, a); }
+            drag-moved(dy) => {
+                root.drag-from = i;
+                root.drag-to = max(0, min(root.songs.length - 1, i + round(dy / self.height)));
+            }
+            drag-dropped => {
+                if (root.drag-from >= 0 && root.drag-to != root.drag-from) {
+                    root.reorder(root.drag-from, root.drag-to);
+                }
+                root.drag-from = -1;
+                root.drag-to = -1;
+            }
         }
     }
 }
@@ -814,6 +904,8 @@ component LibraryPage inherits Rectangle {
     callback show(int);
     // A song row's request, with the app's list number.
     callback action(int, int, SongAction);
+    // A song dragged to a new place: list, from, to.
+    callback reorder(int, int, int);
     callback open-playlist(string);
     callback close-playlist();
     callback new-playlist(string);
@@ -936,6 +1028,7 @@ component LibraryPage inherits Rectangle {
             songs: root.open-songs;
             list-kind: 5;
             action(i, a) => { root.action(5, i, a); }
+            reorder(from, to) => { root.reorder(5, from, to); }
         }
         if root.list == 2 && root.open-id == "" && root.playlists.length == 0: Rectangle { }
     }
@@ -1822,10 +1915,18 @@ component QueueRow inherits Rectangle {
     in property <int> number;
     in property <int> count;
     in property <bool> current;
+    in property <bool> lifted;
+    in property <int> drop-line: -1;
     callback action(SongAction);
+    callback drag-moved(length);
+    callback drag-dropped();
     height: 64px;
     border-radius: 16px;
-    background: root.current ? Theme.accent-container : area.has-hover ? Theme.surface-high : transparent;
+    // The row's own buttons count as the row, so they don't vanish under the pointer.
+    property <bool> hovered: area.has-hover || remove.hovered || handle.active;
+    background: root.lifted ? Theme.accent-container : root.current ? Theme.accent-container : root.hovered ? Theme.surface-high : transparent;
+    border-width: root.lifted ? 2px : 0;
+    border-color: Theme.accent;
     ContextMenuArea {
         Menu {
             MenuItem { title: "Play"; activated => { root.action(SongAction.play); } }
@@ -1856,13 +1957,25 @@ component QueueRow inherits Rectangle {
             Text { text: root.song.title; color: root.current ? Theme.accent : Theme.on-surface; font-size: 14px; font-weight: 600; overflow: elide; }
             Text { text: root.song.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
         }
-        if area.has-hover && !root.current: IconButton {
+        remove := IconButton {
             y: (parent.height - self.height) / 2;
             icon: @image-url("icons/delete.svg");
             size: 32px;
             icon-size: 18px;
+            visible: root.hovered && !root.current && !root.lifted;
             clicked => { root.action(SongAction.remove-from-queue); }
         }
+        handle := DragHandle {
+            y: (parent.height - self.height) / 2;
+            opacity: root.hovered || root.lifted ? 1 : 0;
+            moved(dy) => { root.drag-moved(dy); }
+            dropped => { root.drag-dropped(); }
+        }
+    }
+    if root.drop-line >= 0: DropLine {
+        x: 8px;
+        width: root.width - 16px;
+        y: root.drop-line == 0 ? -1px : root.height - 2px;
     }
 }
 
@@ -1871,7 +1984,10 @@ component QueuePanel inherits Rectangle {
     in property <[Song]> queue;
     in property <int> current;
     callback action(int, SongAction);
+    callback reorder(int, int);
     callback show-now-playing();
+    property <int> drag-from: -1;
+    property <int> drag-to: -1;
     width: 360px;
     border-radius: Theme.radius;
     clip: true;
@@ -1905,7 +2021,20 @@ component QueuePanel inherits Rectangle {
                 number: i;
                 count: root.queue.length;
                 current: i == root.current;
+                lifted: root.drag-from == i;
+                drop-line: root.drag-from >= 0 && root.drag-to == i && i != root.drag-from ? (i < root.drag-from ? 0 : 1) : -1;
                 action(a) => { root.action(i, a); }
+                drag-moved(dy) => {
+                    root.drag-from = i;
+                    root.drag-to = max(0, min(root.queue.length - 1, i + round(dy / self.height)));
+                }
+                drag-dropped => {
+                    if (root.drag-from >= 0 && root.drag-to != root.drag-from) {
+                        root.reorder(root.drag-from, root.drag-to);
+                    }
+                    root.drag-from = -1;
+                    root.drag-to = -1;
+                }
             }
         }
     }
@@ -2113,14 +2242,16 @@ component PlayerBar inherits Rectangle {
         }
         menu-col := VerticalLayout {
             padding: 8px;
-            Text {
-                text: "Sleep timer";
-                color: Theme.muted;
-                font-size: 12px;
-                font-weight: 700;
-                height: 32px;
-                x: 14px;
-                vertical-alignment: center;
+            HorizontalLayout {
+                padding-left: 14px;
+                Text {
+                    text: "Sleep timer";
+                    color: Theme.muted;
+                    font-size: 12px;
+                    font-weight: 700;
+                    height: 32px;
+                    vertical-alignment: center;
+                }
             }
             MenuRow { label: "15 minutes"; clicked => { root.set-sleep(15); } }
             MenuRow { label: "30 minutes"; clicked => { root.set-sleep(30); } }
@@ -2251,6 +2382,8 @@ export component AppWindow inherits Window {
     callback clear-history();
     callback set-cache-limit(int);
     callback clear-kept();
+    /// A song dragged to a new place in a list (5 the open playlist, 6 the queue).
+    callback reorder(int, int, int);
     callback theme-changed();
     callback set-sleep(int);
     callback check-bricks();
@@ -2356,6 +2489,7 @@ export component AppWindow inherits Window {
                         list: root.library-list;
                         show(l) => { root.library-list = l; }
                         action(l, i, a) => { root.song-action(l, i, a); }
+                        reorder(l, from, to) => { root.reorder(l, from, to); }
                         open-playlist(id) => { root.open-playlist(id); }
                         close-playlist => { root.close-playlist(); }
                         new-playlist(name) => { root.new-playlist(name); }
@@ -2400,6 +2534,7 @@ export component AppWindow inherits Window {
                     queue: root.queue;
                     current: root.queue-current;
                     action(i, a) => { root.song-action(6, i, a); }
+                    reorder(from, to) => { root.reorder(6, from, to); }
                     show-now-playing => { root.panel-mode = 0; }
                 }
                 if root.panel-open && root.panel-mode == 0 && root.width > 1180px: SidePanel {
