@@ -9,9 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use slint::{Color, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{Color, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use veena_ffi::{
     LyricsInfo, PlayState, PlayerListener, PlayerState, PlaylistInfo, RepeatMode, TrackInfo, Veena,
 };
@@ -20,6 +20,7 @@ slint::include_modules!();
 
 mod ambience;
 mod mpris;
+mod system_theme;
 
 use ambience::{AmbienceSettings, Moment};
 
@@ -70,7 +71,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         playlist_tracks: Vec::new(),
         picking: None,
         queue_shown: None,
+        lyric_lines: Rc::new(VecModel::default()),
+        heard_at: (0, Instant::now()),
+        sleep: None,
     }));
+    window.set_lyrics(ModelRc::from(ui.borrow().lyric_lines.clone()));
     UI.with(|cell| *cell.borrow_mut() = Some(ui.clone()));
     connect(&window, &ui);
     ui.borrow().refresh_lists();
@@ -127,6 +132,18 @@ pub(crate) struct Ui {
     picking: Option<TrackInfo>,
     /// What the queue panel shows, to rebuild it only when it changes.
     queue_shown: Option<(Vec<String>, Option<u32>)>,
+    /// The lyrics as shown, changed line by line so the list keeps its place.
+    lyric_lines: Rc<VecModel<LyricLine>>,
+    /// The last position the player reported, and when.
+    heard_at: (u64, Instant),
+    sleep: Option<Sleep>,
+}
+
+/// When the sleep timer pauses playback.
+enum Sleep {
+    At(Instant),
+    /// When the song with this key stops being the one playing.
+    EndOfSong(Option<String>),
 }
 
 pub(crate) fn key(t: &TrackInfo) -> String {
@@ -271,6 +288,7 @@ impl Ui {
             return;
         };
         self.state = state;
+        self.heard_at = (self.state.position_ms, Instant::now());
         let shown = (
             self.state.queue.iter().map(key).collect::<Vec<_>>(),
             self.state.current,
@@ -307,7 +325,15 @@ impl Ui {
 
         if changed {
             self.lyrics = None;
-            window.set_lyrics(ModelRc::default());
+            self.lyric_lines.set_vec(Vec::new());
+            if let Some(Sleep::EndOfSong(k)) = &self.sleep
+                && k.is_some()
+                && *k != self.playing_key
+            {
+                self.sleep = None;
+                background(&self.veena, |v| v.pause());
+                self.show_sleep();
+            }
             window.set_lyrics_note("Looking for lyrics…".into());
             if let Some(track) = current.clone() {
                 // Colours, history, lyrics and the offline list follow the song.
@@ -347,53 +373,95 @@ impl Ui {
         self.show_lyrics();
     }
 
-    /// The lines around the one being sung, highlighting it.
+    /// Where the song is now: the last reported position plus the time
+    /// since, while playing.
+    fn position_now(&self) -> u64 {
+        let (at, when) = self.heard_at;
+        if self.state.state == PlayState::Playing {
+            at + when.elapsed().as_millis() as u64
+        } else {
+            at
+        }
+    }
+
+    /// All the lines, highlighting the one being sung (and its words, when
+    /// the lyrics have word timings). Only lines that changed are updated.
     fn show_lyrics(&self) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
         let Some((_, lyrics)) = &self.lyrics else {
             return;
         };
-        let lines: Vec<LyricLine> = if lyrics.synced {
-            let now = self.state.position_ms + 300;
-            let current = lyrics
-                .lines
-                .iter()
-                .rposition(|l| l.time_ms.is_some_and(|t| t <= now));
-            let at = current.map_or(0, |c| c as i64);
-            let from = (at - 1).max(0) as usize;
+        let now = self.position_now() + 300;
+        let current = if lyrics.synced {
             lyrics
                 .lines
                 .iter()
-                .enumerate()
-                .skip(from)
-                .take(6)
-                .map(|(i, l)| LyricLine {
-                    text: if l.text.trim().is_empty() {
-                        "♪".into()
-                    } else {
-                        l.text.clone().into()
-                    },
-                    state: match current {
-                        Some(c) if i == c => 0,
-                        Some(c) if i < c => -1,
-                        _ => 1,
-                    },
-                })
-                .collect()
+                .rposition(|l| l.time_ms.is_some_and(|t| t <= now))
         } else {
-            lyrics
-                .lines
-                .iter()
-                .take(10)
-                .map(|l| LyricLine {
-                    text: l.text.clone().into(),
-                    state: -1,
-                })
-                .collect()
+            None
         };
-        window.set_lyrics(ModelRc::new(VecModel::from(lines)));
+        let lines: Vec<LyricLine> = lyrics
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let text = if l.text.trim().is_empty() {
+                    "♪".to_string()
+                } else {
+                    l.text.clone()
+                };
+                let state = match current {
+                    _ if !lyrics.synced => -1,
+                    Some(c) if i == c => 0,
+                    Some(c) if i < c => -1,
+                    _ => 1,
+                };
+                let by_word = state == 0 && !l.words.is_empty();
+                let (sung, rest) = if by_word {
+                    let split = l.words.iter().take_while(|w| w.time_ms <= now).count();
+                    let join = |w: &[veena_ffi::LyricWordInfo]| {
+                        w.iter().map(|w| w.text.as_str()).collect::<String>()
+                    };
+                    (join(&l.words[..split]), join(&l.words[split..]))
+                } else {
+                    Default::default()
+                };
+                LyricLine {
+                    text: text.into(),
+                    state,
+                    words: by_word,
+                    sung: sung.into(),
+                    rest: rest.into(),
+                }
+            })
+            .collect();
+        let model = &self.lyric_lines;
+        if model.row_count() != lines.len() {
+            model.set_vec(lines);
+            return;
+        }
+        for (i, line) in lines.into_iter().enumerate() {
+            if model.row_data(i).as_ref() != Some(&line) {
+                model.set_row_data(i, line);
+            }
+        }
+    }
+
+    /// The player bar's sleep timer label.
+    fn show_sleep(&self) {
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        window.set_sleep_label(
+            match &self.sleep {
+                None => String::new(),
+                Some(Sleep::EndOfSong(_)) => "End of song".into(),
+                Some(Sleep::At(at)) => {
+                    let left = at.saturating_duration_since(Instant::now()).as_secs();
+                    format!("{}:{:02}", left / 60, left % 60)
+                }
+            }
+            .into(),
+        );
     }
 }
 
@@ -462,6 +530,81 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
     );
     // The timer lives as long as the app.
     std::mem::forget(clock);
+
+    window.set_theme_mode(settings.theme);
+    system_theme::watch(window.as_weak());
+    let weak = window.as_weak();
+    window.on_theme_changed(move || {
+        if let Some(w) = weak.upgrade() {
+            ambience_settings(&w).save();
+        }
+    });
+
+    // Ten times a second: lyrics word by word, and the sleep timer.
+    let ticker = slint::Timer::default();
+    ticker.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(100),
+        || {
+            with_ui(|ui| {
+                if ui.state.state == PlayState::Playing {
+                    ui.show_lyrics();
+                }
+                if let Some(Sleep::At(at)) = ui.sleep {
+                    if Instant::now() >= at {
+                        ui.sleep = None;
+                        background(&ui.veena, |v| v.pause());
+                    }
+                    ui.show_sleep();
+                }
+            })
+        },
+    );
+    std::mem::forget(ticker);
+    window.on_set_sleep(|minutes| {
+        with_ui(|ui| {
+            ui.sleep = match minutes {
+                m if m < 0 => None,
+                0 => Some(Sleep::EndOfSong(ui.playing_key.clone())),
+                m => Some(Sleep::At(
+                    Instant::now() + Duration::from_secs(m as u64 * 60),
+                )),
+            };
+            ui.show_sleep();
+        })
+    });
+
+    load_bricks(window.as_weak(), ui.borrow().veena.clone());
+    let weak = window.as_weak();
+    let v = ui.borrow().veena.clone();
+    window.on_check_bricks(move || {
+        let (url, key) = (veena_ffi::brick_update_url(), veena_ffi::brick_update_key());
+        let Some(w) = weak.upgrade() else { return };
+        if url.is_empty() || key.is_empty() {
+            w.set_brick_note("This build has no update address.".into());
+            return;
+        }
+        w.set_brick_note("Checking…".into());
+        let (v, weak) = (v.clone(), weak.clone());
+        std::thread::spawn(move || {
+            let note = match v.update_plugins(url, key) {
+                Ok(report) => report.replace('\n', " · "),
+                Err(e) => format!("Couldn't check: {e}"),
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    w.set_brick_note(note.into());
+                    load_bricks(w.as_weak(), v);
+                }
+            });
+        });
+    });
+    let weak = window.as_weak();
+    window.on_refresh_logs(move || {
+        if let Some(w) = weak.upgrade() {
+            w.set_logs(veena_ffi::recent_logs().join("\n").into());
+        }
+    });
 
     window.on_search(|query| search(query.to_string()));
     window.on_show_videos(|videos| {
@@ -620,6 +763,56 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
     window.on_set_offline(move |on| v.set_offline(on));
 }
 
+/// The bricks for Settings: what each does, or why it failed. They load
+/// in the background at start, so this waits for them off the window's
+/// thread.
+fn load_bricks(window: slint::Weak<AppWindow>, veena: Arc<Veena>) {
+    std::thread::spawn(move || {
+        let mut plugins = veena.plugins();
+        for _ in 0..60 {
+            if !plugins.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            plugins = veena.plugins();
+        }
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = window.upgrade() {
+                show_bricks(&w, plugins);
+            }
+        });
+    });
+}
+
+fn show_bricks(w: &AppWindow, plugins: Vec<veena_ffi::PluginInfo>) {
+    let items: Vec<BrickItem> = plugins
+        .into_iter()
+        .map(|p| {
+            let kinds: Vec<&str> = [(p.search, "Search"), (p.audio_links, "Audio links")]
+                .into_iter()
+                .filter_map(|(on, name)| on.then_some(name))
+                .collect();
+            BrickItem {
+                name: if p.name.is_empty() {
+                    p.id.clone()
+                } else {
+                    p.name.clone()
+                }
+                .into(),
+                detail: match &p.error {
+                    Some(e) => e.clone(),
+                    None if kinds.is_empty() => "Lyrics".into(),
+                    None => kinds.join(" · "),
+                }
+                .into(),
+                version: p.version.into(),
+                failed: p.error.is_some(),
+            }
+        })
+        .collect();
+    w.set_bricks(ModelRc::new(VecModel::from(items)));
+}
+
 /// Playlists, history and kept songs.
 fn connect_library(window: &AppWindow) {
     window.on_open_playlist(|id| {
@@ -755,6 +948,7 @@ fn ambience_settings(w: &AppWindow) -> AmbienceSettings {
         special_days: w.get_amb_special(),
         autoplay: w.get_autoplay(),
         cache_limit: w.get_cache_limit(),
+        theme: w.get_theme_mode(),
     }
 }
 
@@ -923,8 +1117,10 @@ fn accent_from(url: Option<&str>) {
             with_ui(|ui| {
                 if let Some(w) = ui.window.upgrade() {
                     let theme = w.global::<Theme>();
-                    theme.set_accent(mix((r, g, b), (255, 255, 255), 0.55));
-                    theme.set_accent_container(mix((r, g, b), (10, 10, 14), 0.62));
+                    theme.set_accent_dark(mix((r, g, b), (255, 255, 255), 0.55));
+                    theme.set_accent_container_dark(mix((r, g, b), (10, 10, 14), 0.62));
+                    theme.set_accent_light(mix((r, g, b), (16, 18, 28), 0.45));
+                    theme.set_accent_container_light(mix((r, g, b), (255, 255, 255), 0.78));
                 }
             })
         });

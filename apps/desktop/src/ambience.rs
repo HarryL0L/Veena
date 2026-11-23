@@ -25,6 +25,8 @@ pub struct AmbienceSettings {
     pub autoplay: bool,
     /// Space for kept songs: 0 is 512 MB, then 1, 2, 4 and 8 GB.
     pub cache_limit: i32,
+    /// 0 follows the desktop, 1 light, 2 dark.
+    pub theme: i32,
 }
 
 impl Default for AmbienceSettings {
@@ -37,6 +39,7 @@ impl Default for AmbienceSettings {
             special_days: true,
             autoplay: true,
             cache_limit: 1,
+            theme: 0,
         }
     }
 }
@@ -68,6 +71,13 @@ impl AmbienceSettings {
                 "southern" => s.southern = v == "true",
                 "special_days" => s.special_days = v == "true",
                 "autoplay" => s.autoplay = v == "true",
+                "theme" => {
+                    s.theme = v
+                        .parse::<i32>()
+                        .ok()
+                        .filter(|n| (0..3).contains(n))
+                        .unwrap_or(0)
+                }
                 "cache_limit" => {
                     if let Some(n) = v.parse::<i32>().ok().filter(|n| (0..5).contains(n)) {
                         s.cache_limit = n;
@@ -86,14 +96,15 @@ impl AmbienceSettings {
         }
         let opt = |o: Option<i32>| o.map(|n| n.to_string()).unwrap_or_else(|| "auto".into());
         let text = format!(
-            "ambience={}\nday_part={}\nseason={}\nsouthern={}\nspecial_days={}\nautoplay={}\ncache_limit={}\n",
+            "ambience={}\nday_part={}\nseason={}\nsouthern={}\nspecial_days={}\nautoplay={}\ncache_limit={}\ntheme={}\n",
             self.enabled,
             opt(self.day_part),
             opt(self.season),
             self.southern,
             self.special_days,
             self.autoplay,
-            self.cache_limit
+            self.cache_limit,
+            self.theme
         );
         if let Err(e) = std::fs::write(&file, text) {
             eprintln!("veena: could not save settings: {e}");

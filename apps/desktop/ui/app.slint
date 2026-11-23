@@ -3,7 +3,7 @@
 // Navigation rail on the left, the page in the middle, and the player on
 // the right, coloured from the song's artwork.
 
-import { ListView, Switch } from "std-widgets.slint";
+import { ListView, Switch, Palette } from "std-widgets.slint";
 import { AmbientScene, SceneInfo } from "ambience.slint";
 
 export { SceneInfo }
@@ -23,20 +23,39 @@ export struct LyricLine {
     text: string,
     // -1: already sung, 0: being sung, 1: still to come
     state: int,
+    // Word by word, for the line being sung when the lyrics have word
+    // timings: the words sung so far and the rest.
+    words: bool,
+    sung: string,
+    rest: string,
+}
+
+/// A brick as Settings lists it.
+export struct BrickItem {
+    name: string,
+    detail: string,
+    version: string,
+    failed: bool,
 }
 
 export global Theme {
-    // Taken from the artwork of the song playing.
-    in-out property <color> accent: #a8c7fa;
-    in-out property <color> accent-container: #2b4678;
-    out property <color> background: #111318;
-    out property <color> surface: #191c20;
-    out property <color> surface-container: #1d2024;
-    out property <color> surface-high: #282a2f;
-    out property <color> surface-highest: #33353a;
-    out property <color> on-surface: #e2e2e9;
-    out property <color> muted: #c4c6d0;
-    out property <color> outline: #44474e;
+    in-out property <bool> dark: true;
+    // Taken from the artwork of the song playing, for each theme.
+    in-out property <color> accent-dark: #a8c7fa;
+    in-out property <color> accent-container-dark: #2b4678;
+    in-out property <color> accent-light: #3d5d93;
+    in-out property <color> accent-container-light: #d8e2ff;
+    out property <color> accent: dark ? accent-dark : accent-light;
+    out property <color> accent-container: dark ? accent-container-dark : accent-container-light;
+    // The window's base, with the panes a step lower (dark) or higher (light).
+    out property <color> background: dark ? #111318 : #fafaff;
+    out property <color> surface: dark ? #191c20 : #e8e9f0;
+    out property <color> surface-container: dark ? #1d2024 : #f0f0f7;
+    out property <color> surface-high: dark ? #282a2f : #e6e7ee;
+    out property <color> surface-highest: dark ? #33353a : #dcdde5;
+    out property <color> on-surface: dark ? #e2e2e9 : #1a1c21;
+    out property <color> muted: dark ? #c4c6d0 : #464a54;
+    out property <color> outline: dark ? #44474e : #c3c6d0;
     out property <length> radius: 28px;
 }
 
@@ -1026,6 +1045,12 @@ component SettingsPage inherits Rectangle {
     in-out property <bool> offline;
     in property <string> usage;
     in-out property <int> cache-limit;
+    in-out property <int> theme-mode;
+    callback theme-changed();
+    in property <[BrickItem]> bricks;
+    in property <string> brick-note;
+    callback check-bricks();
+    callback show-logs();
     callback set-cache-limit(int);
     callback clear-kept();
     property <bool> confirm-clear;
@@ -1152,6 +1177,24 @@ component SettingsPage inherits Rectangle {
                 toggled(on) => { root.set-autoplay(on); }
             }
             Text {
+                text: "Look";
+                color: Theme.accent;
+                font-weight: 700;
+                height: 48px;
+                vertical-alignment: center;
+            }
+            ChoiceRow {
+                icon: @image-url("icons/palette.svg");
+                title: "Theme";
+                note: "System follows your desktop's light or dark setting.";
+                options: ["System", "Light", "Dark"];
+                selected: root.theme-mode - 1;
+                picked(i) => {
+                    root.theme-mode = i + 1;
+                    root.theme-changed();
+                }
+            }
+            Text {
                 text: "Living background";
                 color: Theme.accent;
                 font-weight: 700;
@@ -1212,6 +1255,111 @@ component SettingsPage inherits Rectangle {
                 subtitle: "Fireworks in the sky on 31 December and 1 January.";
                 checked <=> root.amb-special;
                 toggled => { root.ambience-changed(); }
+            }
+            Text {
+                text: "Bricks";
+                color: Theme.accent;
+                font-weight: 700;
+                height: 48px;
+                vertical-alignment: center;
+            }
+            Text {
+                text: "The parts that fetch music and lyrics. They update on their own, without a new app.";
+                color: Theme.muted;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 10px; }
+            for brick[i] in root.bricks: Rectangle {
+                height: 64px;
+                border-top-left-radius: i == 0 ? Theme.radius : 4px;
+                border-top-right-radius: i == 0 ? Theme.radius : 4px;
+                border-bottom-left-radius: 4px;
+                border-bottom-right-radius: 4px;
+                background: Theme.surface-container;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 20px;
+                    spacing: 16px;
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 20px;
+                        background: Theme.accent-container;
+                        Icon {
+                            source: brick.failed ? @image-url("icons/bug.svg") : @image-url("icons/extension.svg");
+                            tint: Theme.accent;
+                            width: 22px;
+                            height: 22px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text { text: brick.name; color: Theme.on-surface; font-size: 15px; }
+                        Text { text: brick.detail; color: brick.failed ? #f2b8b5 : Theme.muted; font-size: 12px; overflow: elide; }
+                    }
+                    Text { text: brick.version; color: Theme.muted; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+                }
+            }
+            Rectangle {
+                height: 64px;
+                border-radius: 4px;
+                border-bottom-left-radius: Theme.radius;
+                border-bottom-right-radius: Theme.radius;
+                background: Theme.surface-container;
+                HorizontalLayout {
+                    padding-left: 72px;
+                    padding-right: 16px;
+                    spacing: 12px;
+                    Text {
+                        text: root.brick-note;
+                        color: Theme.muted;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    Chip { y: (parent.height - self.height) / 2; label: "Check for updates"; clicked => { root.check-bricks(); } }
+                }
+            }
+            Text {
+                text: "Help";
+                color: Theme.accent;
+                font-weight: 700;
+                height: 48px;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                height: 72px;
+                border-radius: Theme.radius;
+                background: logs-area.has-hover ? Theme.surface-high : Theme.surface-container;
+                logs-area := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.show-logs(); }
+                }
+                HorizontalLayout {
+                    padding: 16px;
+                    spacing: 16px;
+                    Rectangle {
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 20px;
+                        background: Theme.accent-container;
+                        Icon {
+                            source: @image-url("icons/bug.svg");
+                            tint: Theme.accent;
+                            width: 22px;
+                            height: 22px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Text { text: "Logs"; color: Theme.on-surface; font-size: 16px; }
+                        Text { text: "What Veena did recently, to copy when something doesn't play."; color: Theme.muted; font-size: 13px; }
+                    }
+                }
             }
             Text {
                 text: "© 2026 HarryL0L. Veena Music is free software under the GNU GPL, version 3 or later. Made with Slint.";
@@ -1550,12 +1698,23 @@ component SidePanel inherits Rectangle {
                         padding-bottom: 240px;
                         for line in root.lyrics: Text {
                             property <int> sung: line.state;
+                            property <bool> by-word: line.state == 0 && line.words;
                             text: line.text;
                             wrap: word-wrap;
                             font-size: line.state == 0 ? 20px : 15px;
-                            font-weight: line.state == 0 ? 800 : 600;
-                            color: line.state == 0 ? Theme.accent : line.state < 0 ? Theme.on-surface.transparentize(0.4) : Theme.on-surface.transparentize(0.65);
+                            font-weight: line.state == 0 ? 700 : 600;
+                            // Word by word, the words colour in as they're sung,
+                            // drawn over this (now invisible) line.
+                            color: self.by-word ? transparent : line.state == 0 ? Theme.accent : line.state < 0 ? Theme.on-surface.transparentize(0.4) : Theme.on-surface.transparentize(0.65);
                             animate font-size, color { duration: 250ms; easing: ease-out; }
+                            if self.by-word: StyledText {
+                                width: parent.width;
+                                height: parent.height;
+                                // Follows the line's growing size, so both wrap alike.
+                                default-font-size: parent.font-size;
+                                default-color: Theme.accent;
+                                text: @markdown("**<font color=\"\{Theme.accent}\">\{line.sung}</font><font color=\"\{Theme.accent.transparentize(0.6)}\">\{line.rest}</font>**");
+                            }
                             changed sung => { self.follow(); }
                             // Lyrics that arrive mid-song start at the current line.
                             init => { self.follow(); }
@@ -1569,6 +1728,90 @@ component SidePanel inherits Rectangle {
                 }
             }
         }
+    }
+}
+
+/// Recent log lines, selectable, to copy when something goes wrong.
+component LogsDialog inherits Rectangle {
+    in property <string> text;
+    callback refresh();
+    callback close();
+    background: #000000a0;
+    TouchArea { clicked => { root.close(); } }
+    Rectangle {
+        width: min(860px, root.width - 64px);
+        height: root.height - 96px;
+        border-radius: 28px;
+        background: Theme.surface-container;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000080;
+        TouchArea { }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 12px;
+            Text { text: "Logs"; color: Theme.on-surface; font-size: 24px; font-weight: 800; }
+            Text { text: "What Veena did recently. Copy this when something doesn't play."; color: Theme.muted; font-size: 14px; }
+            Rectangle {
+                vertical-stretch: 1;
+                border-radius: 16px;
+                background: Theme.surface-highest;
+                clip: true;
+                log-scroll := Flickable {
+                    x: 12px;
+                    y: 12px;
+                    width: parent.width - 24px;
+                    height: parent.height - 24px;
+                    content-height: log-text.preferred-height;
+                    content-width: max(self.width, log-text.preferred-width);
+                    log-text := TextInput {
+                        text: root.text == "" ? "Nothing yet." : root.text;
+                        read-only: true;
+                        single-line: false;
+                        font-family: "monospace";
+                        font-size: 12px;
+                        color: Theme.on-surface;
+                    }
+                    init => { self.content-y = min(0px, self.height - log-text.preferred-height); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                Chip { label: "Refresh"; clicked => { root.refresh(); } }
+                Chip {
+                    label: "Copy all";
+                    selected: true;
+                    clicked => {
+                        log-text.select-all();
+                        log-text.copy();
+                    }
+                }
+                Chip { label: "Close"; clicked => { root.close(); } }
+            }
+        }
+    }
+}
+
+/// One choice in a small pop-up menu.
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> current;
+    callback clicked;
+    height: 40px;
+    border-radius: 12px;
+    background: area.has-hover ? Theme.surface-highest : transparent;
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        x: 14px;
+        text: root.label;
+        color: root.current ? Theme.accent : Theme.on-surface;
+        font-size: 14px;
+        font-weight: root.current ? 700 : 400;
+        vertical-alignment: center;
+        height: parent.height;
     }
 }
 
@@ -1731,6 +1974,9 @@ component PlayerBar inherits Rectangle {
     in property <bool> panel-open;
     // 0 now playing, 1 up next
     in property <int> panel-mode;
+    // "" without a sleep timer, else when it stops.
+    in property <string> sleep-label;
+    callback set-sleep(int);
     callback toggle();
     callback next();
     callback previous();
@@ -1811,11 +2057,25 @@ component PlayerBar inherits Rectangle {
                 Text { text: root.loading ? "…" : root.duration; color: Theme.muted; font-size: 12px; width: 44px; vertical-alignment: center; }
             }
         }
-        // Lyrics panel and volume
+        // Sleep timer, panels and volume
         HorizontalLayout {
-            width: 240px;
+            width: 350px;
             spacing: 8px;
             alignment: end;
+            if root.sleep-label != "": Text {
+                text: root.sleep-label;
+                color: Theme.accent;
+                font-size: 12px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            sleep-button := IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("icons/bedtime.svg");
+                fill: root.sleep-label != "" ? Theme.accent-container : transparent;
+                tint: root.sleep-label != "" ? Theme.accent : Theme.muted;
+                clicked => { sleep-menu.show(); }
+            }
             IconButton {
                 y: (parent.height - self.height) / 2;
                 icon: @image-url("icons/library_music.svg");
@@ -1838,6 +2098,36 @@ component PlayerBar inherits Rectangle {
                 value: root.volume;
                 released(v) => { root.set-volume(v); }
             }
+        }
+    }
+    sleep-menu := PopupWindow {
+        x: root.width - 420px;
+        y: -self.height - 8px;
+        width: 220px;
+        height: menu-col.preferred-height;
+        Rectangle {
+            border-radius: 20px;
+            background: Theme.surface-high;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000060;
+        }
+        menu-col := VerticalLayout {
+            padding: 8px;
+            Text {
+                text: "Sleep timer";
+                color: Theme.muted;
+                font-size: 12px;
+                font-weight: 700;
+                height: 32px;
+                x: 14px;
+                vertical-alignment: center;
+            }
+            MenuRow { label: "15 minutes"; clicked => { root.set-sleep(15); } }
+            MenuRow { label: "30 minutes"; clicked => { root.set-sleep(30); } }
+            MenuRow { label: "45 minutes"; clicked => { root.set-sleep(45); } }
+            MenuRow { label: "1 hour"; clicked => { root.set-sleep(60); } }
+            MenuRow { label: "End of this song"; clicked => { root.set-sleep(0); } }
+            if root.sleep-label != "": MenuRow { label: "Turn off"; current: true; clicked => { root.set-sleep(-1); } }
         }
     }
 }
@@ -1879,6 +2169,21 @@ export component AppWindow inherits Window {
     in property <string> picking-for;
     // Index into 512 MB, 1, 2, 4, 8 GB.
     in-out property <int> cache-limit: 1;
+    // 0 follows the desktop, 1 light, 2 dark.
+    in-out property <int> theme-mode;
+    in property <bool> system-dark: true;
+    property <bool> dark: root.theme-mode == 2 || (root.theme-mode == 0 && root.system-dark);
+    changed dark => { root.apply-theme(); }
+    init => { root.apply-theme(); }
+    function apply-theme() {
+        Theme.dark = root.dark;
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    in property <string> sleep-label;
+    in property <[BrickItem]> bricks;
+    in property <string> brick-note;
+    in property <string> logs;
+    in-out property <bool> logs-open;
     in-out property <bool> keep-songs: true;
     in-out property <bool> offline;
     in property <string> usage;
@@ -1946,6 +2251,10 @@ export component AppWindow inherits Window {
     callback clear-history();
     callback set-cache-limit(int);
     callback clear-kept();
+    callback theme-changed();
+    callback set-sleep(int);
+    callback check-bricks();
+    callback refresh-logs();
 
     // Keyboard shortcuts. Keys typed into the search field go there first.
     keys := FocusScope {
@@ -2060,6 +2369,15 @@ export component AppWindow inherits Window {
                         offline <=> root.offline;
                         usage: root.usage;
                         cache-limit <=> root.cache-limit;
+                        theme-mode <=> root.theme-mode;
+                        theme-changed => { root.theme-changed(); }
+                        bricks: root.bricks;
+                        brick-note: root.brick-note;
+                        check-bricks => { root.check-bricks(); }
+                        show-logs => {
+                            root.refresh-logs();
+                            root.logs-open = true;
+                        }
                         set-cache-limit(i) => { root.set-cache-limit(i); }
                         clear-kept => { root.clear-kept(); }
                         amb-enabled <=> root.amb-enabled;
@@ -2118,6 +2436,8 @@ export component AppWindow inherits Window {
                     volume: root.volume;
                     panel-open: root.panel-open;
                     panel-mode: root.panel-mode;
+                    sleep-label: root.sleep-label;
+                    set-sleep(m) => { root.set-sleep(m); }
                     toggle => { root.toggle(); }
                     next => { root.next(); }
                     previous => { root.previous(); }
@@ -2137,6 +2457,13 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
+    if root.logs-open: LogsDialog {
+        width: root.width;
+        height: root.height;
+        text: root.logs;
+        refresh => { root.refresh-logs(); }
+        close => { root.logs-open = false; }
     }
     if root.picking-for != "": PlaylistPicker {
         width: root.width;
