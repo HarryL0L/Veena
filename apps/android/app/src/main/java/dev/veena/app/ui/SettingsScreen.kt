@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -67,6 +68,9 @@ import dev.veena.app.ThemeMode
  * title that shrinks as you scroll, and grouped rows on rounded cards, each
  * with a round tinted icon.
  */
+/** The brick note while a check runs. */
+private const val CHECKING = "Checking…"
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () -> Unit, onOpenSaved: () -> Unit) {
@@ -74,7 +78,8 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
     val used by viewModel.library.cacheBytes.collectAsStateWithLifecycle()
     val saved by viewModel.library.cached.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
-    val bricks = remember { viewModel.bricks() }
+    var bricks by remember { mutableStateOf(viewModel.bricks()) }
+    var brickNote by remember { mutableStateOf<String?>(null) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val uriHandler = LocalUriHandler.current
 
@@ -311,10 +316,11 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
             }
 
             group("Bricks", "The parts that fetch music and lyrics. They update on their own, without a new app.") {
+                val count = bricks.size + 1
                 bricks.mapIndexed { i, brick ->
                     @Composable {
                         Item(
-                            index = i, count = bricks.size,
+                            index = i, count = count,
                             icon = when {
                                 brick.error != null -> R.drawable.ic_bug
                                 brick.audioLinks -> R.drawable.ic_music_note
@@ -329,7 +335,29 @@ fun SettingsScreen(viewModel: PlayerViewModel, onBack: () -> Unit, onLogs: () ->
                             trailing = { Text(brick.version, style = MaterialTheme.typography.labelLarge) },
                         )
                     }
-                }
+                } + listOf<@Composable () -> Unit>({
+                    val checking = brickNote == CHECKING
+                    Item(
+                        index = bricks.size, count = count,
+                        icon = R.drawable.ic_extension,
+                        title = "Check for updates",
+                        subtitle = brickNote ?: "Bricks also check on their own once a day.",
+                        onClick = {
+                            if (!checking) {
+                                brickNote = CHECKING
+                                viewModel.checkBricks { result ->
+                                    brickNote = result
+                                    bricks = viewModel.bricks()
+                                }
+                            }
+                        },
+                        trailing = if (checking) {
+                            { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp) }
+                        } else {
+                            null
+                        },
+                    )
+                })
             }
 
             group("About") {

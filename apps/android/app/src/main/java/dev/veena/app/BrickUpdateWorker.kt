@@ -12,6 +12,7 @@ import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import uniffi.veena_ffi.Veena
 import uniffi.veena_ffi.brickUpdateKey
 import uniffi.veena_ffi.brickUpdateUrl
 
@@ -39,6 +40,20 @@ class BrickUpdateWorker(context: Context, params: WorkerParameters) : CoroutineW
         /** A build setting overrides the address built into the core. */
         private fun updateUrl() = BuildConfig.UPDATE_URL.ifEmpty { brickUpdateUrl() }
         private fun updateKey() = BuildConfig.UPDATE_KEY.ifEmpty { brickUpdateKey() }
+
+        /**
+         * Check right now (from Settings). Returns what changed, in words.
+         * Call off the main thread: it downloads.
+         */
+        fun checkNow(veena: Veena): String = when {
+            updateUrl().isEmpty() || updateKey().isEmpty() -> "This build has no update address."
+            else -> runCatching { veena.updatePlugins(updateUrl(), updateKey()) }
+                .getOrElse {
+                    Log.w("veena", "brick update failed: ${it.message}")
+                    "Couldn't check. Are you online?"
+                }
+                .replace("\n", " · ")
+        }
 
         /** Schedule the daily check, if this build has an update address and key. */
         fun schedule(context: Context) {

@@ -67,6 +67,13 @@ class PlayerViewModel(private val hub: PlayerHub, val library: LibraryHub, priva
     /** Installed bricks, for the settings page. */
     fun bricks() = hub.veena.plugins()
 
+    /** Look for brick updates now; [done] gets the result on the main thread. */
+    fun checkBricks(done: (String) -> Unit) {
+        viewModelScope.launch {
+            done(withContext(Dispatchers.IO) { BrickUpdateWorker.checkNow(hub.veena) })
+        }
+    }
+
     private val _search = MutableStateFlow(SearchUiState())
     val search: StateFlow<SearchUiState> = _search.asStateFlow()
 
