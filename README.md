@@ -1,239 +1,109 @@
-# Veena Music
+<br>
 
-A modular music player for Android and Linux.
+<p align="center">
+  <img src="apps/desktop/data/veena-music.svg" width="72" height="72" alt="">
+</p>
 
-Veena keeps the player stable and makes music sources swappable. Sources are small
-plugins that update on their own, so changes on a streaming site never require a
-new app release.
+<h1 align="center">Veena Music</h1>
 
----
+<p align="center">
+  A private, open-source music player for Android and Linux.
+</p>
+
+<p align="center">
+  <a href="../../releases/tag/nightly"><img src="https://img.shields.io/badge/download-latest-111827?style=flat-square" alt="Download"></a>
+  <img src="https://img.shields.io/badge/platforms-Android%20%C2%B7%20Linux-111827?style=flat-square" alt="Platforms: Android and Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-111827?style=flat-square" alt="License: GPL-3.0"></a>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="docs/images/showcase.webp" width="900" alt="Veena Music on Linux and Android">
+</p>
+
+<br>
 
 ## Overview
 
-| | |
-|---|---|
-| **Platforms** | Android 8.0+ (API 26) · Linux |
-| **Core** | Rust |
-| **Android UI** | Jetpack Compose · Material 3 Expressive |
-| **Linux UI** | Slint |
-| **Sources** | YouTube Music · Local files · Extensible via plugins |
-| **Status** | Early development · Linux terminal player with plugins |
+Veena Music is one player for Android and Linux, built on a shared core in
+Rust. Music sources are small signed plugins that update independently of
+the app, so playback keeps working when a service changes.
 
----
+No account. No tracking. Your library stays on your device.
 
-## Principles
+## Highlights
 
-**Stable core.** Playback, queue, library and updates live in one Rust core shared by every platform.
+- **Search and radio** — find music and videos; any result can start a radio of similar songs.
+- **Library** — liked songs, history and playlists, ordered by drag and drop.
+- **Lyrics** — synced to the song, highlighted word by word where available.
+- **Offline** — songs you play in full stay available without a connection.
+- **Playback** — queue, shuffle, repeat, autoplay and a sleep timer.
+- **Appearance** — light and dark themes that follow the system, with colours from the artwork.
 
-**Swappable sources.** Every music source is a plugin. Add, remove or replace sources without touching the core.
+## Get started
 
-**Self-updating.** Plugins update in the background. No app update needed when a source changes.
+**Android** — install `veena-arm64.apk` (Android 8.0 or later).
 
-**Secure by default.** Every plugin is signature-verified before it runs, sandboxed while it runs, and rolled back if it fails.
+**Linux** — unpack `veena-music-linux-x86_64.tar.gz` or
+`veena-music-linux-aarch64.tar.gz` and run `./install.sh`. No administrator
+rights are needed.
 
----
+Both are available on the [latest release](../../releases/tag/nightly).
 
-## How it works
+## Privacy and security
 
-```
-  ┌────────────────────────────────────────────┐
-  │  Interface                                 │
-  │  Compose (Android)  ·  Slint (Linux)       │
-  └─────────────────────┬──────────────────────┘
-                        │
-  ┌─────────────────────┴──────────────────────┐
-  │  Veena Core  (Rust)                        │
-  │  Playback · Queue · Library · Updater      │
-  └─────────────────────┬──────────────────────┘
-                        │
-  ┌─────────────────────┴──────────────────────┐
-  │  Plugins  (signed, auto-updating)          │
-  │  YouTube Music  ·  Local files  ·  …       │
-  └────────────────────────────────────────────┘
-```
+Plugins run in a sandbox with access only to the domains they declare, and
+none to your files. Every plugin update is signed, verified before use and
+rolled back if it fails. Dependencies are checked for known vulnerabilities
+on every change. To report an issue, see [SECURITY.md](SECURITY.md).
 
-1. **The interface** shows your music and sends commands such as play, pause and search.
-2. **The core** plays audio, manages the queue and keeps plugins up to date.
-3. **Plugins** find music and return something playable.
+<br>
 
----
+<details>
+<summary><b>For developers</b></summary>
 
-## Design
+<br>
 
-### Android
-- Material 3 Expressive with dynamic color from your wallpaper on Android 12+.
-- A built-in Veena palette on Android 8–11.
-- Background playback with lock screen, notification and headphone controls.
-- Full player with large artwork, seek bar, shuffle, repeat and queue.
-- Pauses for calls and when headphones are unplugged.
-- Colours taken from each song's artwork; swipe covers to change songs.
-- Home, Search and Library tabs: recently played, liked songs, playlists.
-- Synced lyrics, queue reordering, sleep timer.
+**Architecture.** A Rust core handles playback, the queue, the library and
+plugin updates. The Android app (Jetpack Compose) and the Linux app (Slint)
+are thin interfaces over it. Plugins, called bricks, are JavaScript files
+run by an engine in the core, so the same brick works on both platforms.
+Bricks fill three slots: search, audio links and lyrics. When one fails,
+the next is tried. See [Writing a Veena plugin](plugins/README.md).
 
-### Linux
-- Desktop app in Slint, Material You styled: navigation rail, song tables,
-  a Now Playing panel with live lyrics, and a player bar with volume.
-- Colours from each song's artwork; X11 and Wayland.
-- Right-click menus and keyboard shortcuts: Space play/pause, Ctrl+F search,
-  ←/→ seek, Ctrl+←/→ previous/next, Ctrl+↑/↓ volume.
-- Same core as Android: bricks, liked songs, offline cache, lyrics.
-- Media keys and the desktop's media controls (GNOME, KDE and others) via
-  MPRIS: song, artwork, play/pause, next/previous, seeking, shuffle, repeat
-  and volume.
-
-Run it with `cargo run --release -p veena-desktop`. To add it to your app
-menu, copy `apps/desktop/veena-desktop.desktop` to `~/.local/share/applications/`,
-`apps/desktop/data/veena-music.svg` to `~/.local/share/icons/hicolor/scalable/apps/`,
-and the binary to a folder on your `PATH`. The UI is made with
-[Slint](https://slint.dev) under its royalty-free license.
-
----
-
-## Plugins
-
-The app is one stable piece. Only the parts that need constant updates are plugins: small JavaScript files, called bricks, run by an engine built into the core. The same brick runs on Android and Linux.
-
-| Slot | Job | Fallback |
-|---|---|---|
-| **Search** | Find songs, albums and artists | Every search brick is queried |
-| **Audio links** | Turn a song into a playable link | If one brick fails, the next is tried |
-
-Plugins update automatically and securely:
-
-| Step | What happens |
-|---|---|
-| Check | Veena checks for new plugin versions daily. |
-| Verify | Each download is checked against Veena's signing key. |
-| Swap | The new version loads instantly. |
-| Recover | If it fails, Veena returns to the previous version. |
-
-Updates are published by the **Publish bricks** workflow whenever a file in
-`plugins/` changes: it signs the bricks and puts them in the
-[`bricks` release](../../releases/tag/bricks), which both apps check. A brick
-must get a higher `version` in its `meta` when its code changes, or the
-workflow refuses to publish it. The signing key is the `VEENA_BRICK_KEY`
-repository secret; its public key is built into the apps.
-
-Plugins can only reach the domains they declare. They have no file system access.
-
-On Linux, `yt-dlp` will be available as an optional fallback that stays up to date automatically.
-
----
-
-## Getting started
-
-Veena currently runs as a terminal player on Linux.
-
-**Requirements**
-
-- Rust 1.88 or newer
-- ALSA development files: `sudo apt install libasound2-dev pkg-config` (Debian, Ubuntu)
-
-**Build**
+**Building.** Requires Rust 1.88 or newer and, on Linux, the ALSA
+development files (`libasound2-dev` and `pkg-config` on Debian and Ubuntu).
 
 ```sh
-cargo build --release
+cargo run --release -p veena-desktop   # Linux app
+cargo build --release -p veena         # terminal player
 ```
 
-**Use**
+For Android, `apps/android/build-rust.sh` builds the core with the Android
+NDK and `cargo-ndk`; Gradle then builds the app.
 
-```sh
-veena play ~/Music                      # play a folder
-veena play song.flac https://…/a.mp3    # files and links
-veena play ~/Music --shuffle --repeat all
-veena list ~/Music                      # show your library
-veena search "raga" --in ~/Music        # find tracks
+**Publishing bricks.** The *Publish bricks* workflow signs changed files in
+`plugins/` and publishes them to the [`bricks` release](../../releases/tag/bricks),
+which both apps check daily. A brick's `version` must increase with every
+code change. The signing key is the `VEENA_BRICK_KEY` repository secret.
+
+**Layout.**
+
+```
+crates/    Rust core: core, audio, player, library, plugin, updater, net, src-local, ffi
+apps/      android, desktop (Linux), linux (terminal player), sign (brick signing)
+plugins/   Bricks and the brick guide
 ```
 
-**Plugins**
+</details>
 
-```sh
-veena --plugins ./plugins plugins                       # show installed plugins
-veena --plugins ./plugins find "sitar" --play           # search plugins and play
-veena --plugins ./plugins open youtube-music <album-id> # open an album
-```
-
-Plugins load from `~/.local/share/veena/plugins` by default. See [Writing a Veena plugin](plugins/README.md).
-
-| Key | Action |
-|---|---|
-| `Space` | Play / pause |
-| `←` `→` | Seek 5 seconds |
-| `n` `b` | Next / previous |
-| `↑` `↓` | Volume |
-| `s` `r` | Shuffle / repeat |
-| `l` | Show queue |
-| `q` | Quit |
-
-Supported formats: MP3, FLAC, AAC/M4A, ALAC, Ogg Vorbis, WAV, AIFF, MKA.
+<br>
 
 ---
 
-## Project structure
-
-```
-veena/
-├── crates/
-│   ├── veena-core/        Tracks, sources, queue
-│   ├── veena-audio/       Decoding, streaming, output
-│   ├── veena-player/      Queue and audio working together
-│   ├── veena-plugin/      JavaScript plugin engine and sandbox
-│   ├── veena-updater/     Signed plugin updates and rollback
-│   ├── veena-net/         Shared HTTP and TLS setup
-│   ├── veena-src-local/   Local music files
-│   └── veena-ffi/         Bridge from the core to Kotlin (UniFFI)
-├── apps/
-│   ├── android/           Android app (Jetpack Compose)
-│   ├── desktop/           Linux desktop app (Slint)
-│   ├── linux/             Terminal player
-│   └── sign/              veena-sign: sign and publish plugin updates
-└── plugins/               Source plugins and the plugin guide
-```
-
-
-
----
-
-## Roadmap
-
-- [x] Core playback for local files and streams
-- [x] Plugin engine and sandbox
-- [x] Search and audio-link slots with automatic fallback
-- [x] YouTube Music search and playback (most tracks)
-- [x] Automatic, signed plugin updates
-- [x] Android app with Material 3 Expressive
-- [x] Background playback, lock screen and headphone controls
-- [x] Official YouTube Music tracks on Android (proof-of-origin tokens)
-- [x] Linux desktop app (Slint, X11 and Wayland)
-- [x] Liked songs, recently played and playlists
-- [x] Synced lyrics (LRCLIB brick)
-- [ ] Offline downloads, gapless playback
-
----
-
-## Security
-
-Dependencies are checked for known vulnerabilities on every change and every week, and updates arrive as automatic pull requests.
-See [SECURITY.md](SECURITY.md) to report a problem.
-
----
-
-## License
-
-Copyright (C) 2026 HarryL0L
-
-Veena Music is free software: you can redistribute it and/or modify it under
-the terms of the [GNU General Public License](LICENSE), version 3 or (at your
-option) any later version. It comes with no warranty.
-
-Bricks you write yourself may use any license, as long as they only talk to
-Veena through the brick interface: see the
-[additional permission for bricks](LICENSE-BRICKS.md). The bricks in this
-repository are GPL like the rest of Veena.
-
----
-
-## Note
-
+<sub>
+Copyright © 2026 HarryL0L. Licensed under the <a href="LICENSE">GNU General Public License v3.0 or later</a>;
+bricks you write may use any license (<a href="LICENSE-BRICKS.md">details</a>).
 Veena is an independent project, not affiliated with YouTube or Google.
-Use of third-party services is subject to their terms.
+</sub>
