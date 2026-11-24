@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="https://harryl0l.github.io/Veena-music/"><img src="https://img.shields.io/badge/website-harryl0l.github.io-111827?style=flat-square" alt="Website"></a>
   <a href="../../releases/tag/nightly"><img src="https://img.shields.io/badge/download-latest-111827?style=flat-square" alt="Download"></a>
   <img src="https://img.shields.io/badge/platforms-Android%20%C2%B7%20Linux-111827?style=flat-square" alt="Platforms: Android and Linux">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-111827?style=flat-square" alt="License: GPL-3.0"></a>
