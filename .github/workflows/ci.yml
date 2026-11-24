@@ -113,13 +113,14 @@ jobs:
 
   nightly:
     name: Publish the nightly pre-release
-    # One pre-release named "nightly", replaced by every push, so the
-    # newest build always has the same download page.
-    if: github.event_name == 'push'
+    # One pre-release named "nightly", replaced by every push to main, so
+    # the newest build always has the same download page. Other branches
+    # are built and tested but never replace it.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [android, linux]
     runs-on: ubuntu-latest
     concurrency:
-      group: nightly-${{ github.ref }}
+      group: nightly
       cancel-in-progress: true
     permissions:
       contents: write
@@ -137,7 +138,7 @@ jobs:
           ls -l dist
           gh release delete nightly --yes --cleanup-tag || true
           {
-            printf 'Built from %s on branch %s.\n\n%s\n\n' "${GITHUB_SHA::7}" "$GITHUB_REF_NAME" "$(printf '%s' "$MESSAGE" | head -1)"
+            printf 'Built from %s.\n\n%s\n\n' "${GITHUB_SHA::7}" "$(printf '%s' "$MESSAGE" | head -1)"
             printf -- '- **Phone:** veena-arm64.apk (the x86_64 one is for emulators)\n'
             printf -- '- **Linux:** veena-music-linux-x86_64.tar.gz (most PCs) or veena-music-linux-aarch64.tar.gz (ARM: Raspberry Pi, Asahi, ARM laptops). Unpack, then run ./install.sh\n'
           } > notes.md
