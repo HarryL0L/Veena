@@ -139,8 +139,8 @@ mod tests {
         let mut decoder = open(&Stream::file(&path), None).unwrap();
         std::fs::remove_file(&path).unwrap();
 
-        assert_eq!(decoder.sample_rate(), 8000);
-        assert_eq!(decoder.channels(), 1);
+        assert_eq!(decoder.sample_rate().get(), 8000);
+        assert_eq!(decoder.channels().get(), 1);
         let duration = decoder.total_duration().unwrap();
         assert!((duration.as_secs_f32() - 1.0).abs() < 0.01, "{duration:?}");
         decoder.try_seek(Duration::from_millis(500)).unwrap();

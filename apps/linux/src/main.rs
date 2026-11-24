@@ -187,7 +187,7 @@ struct PlaybackArgs {
     #[arg(short, long, value_enum, default_value_t = RepeatArg::Off)]
     repeat: RepeatArg,
     /// Volume from 0 to 100.
-    #[arg(short, long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
+    #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
     volume: u8,
 }
 

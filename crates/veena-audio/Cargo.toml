@@ -1,7 +1,6 @@
 [package]
 name = "veena-audio"
 version.workspace = true
-license.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish = false
@@ -11,6 +10,6 @@ veena-core = { path = "../veena-core" }
 log = "0.4.35"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-rodio = { version = "0.21.1", default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav", "symphonia-mkv", "symphonia-alac", "symphonia-aiff"] }
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav", "symphonia-mkv", "symphonia-alac", "symphonia-aiff"] }
 thiserror = "2.0.21"
 veena-net = { path = "../veena-net" }

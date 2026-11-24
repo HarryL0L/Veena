@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use veena_core::Stream;
 
 use crate::decode::{self, Input};
@@ -161,8 +161,8 @@ impl Drop for AudioEngine {
 /// Open the audio output. `broken` is set if the system later stops the
 /// stream, for example when headphones or a Bluetooth device connect or
 /// disconnect on Android; the engine then opens a new one.
-fn open_output(broken: Arc<AtomicBool>) -> Result<OutputStream, AudioError> {
-    let on_error = move |e: rodio::cpal::StreamError| {
+fn open_output(broken: Arc<AtomicBool>) -> Result<MixerDeviceSink, AudioError> {
+    let on_error = move |e: rodio::CpalError| {
         log::warn!(target: "veena_audio", "audio output stopped: {e}");
         broken.store(true, Ordering::Relaxed);
     };
@@ -182,13 +182,13 @@ fn open_output(broken: Arc<AtomicBool>) -> Result<OutputStream, AudioError> {
 
 #[cfg(not(target_os = "android"))]
 fn open_platform_output(
-    on_error: impl FnMut(rodio::cpal::StreamError) + Send + Clone + 'static,
-) -> Result<OutputStream, AudioError> {
-    OutputStreamBuilder::from_default_device()
+    on_error: impl FnMut(rodio::CpalError) + Send + Clone + 'static,
+) -> Result<MixerDeviceSink, AudioError> {
+    DeviceSinkBuilder::from_default_device()
         .and_then(|builder| {
             builder
                 .with_error_callback(on_error)
-                .open_stream_or_fallback()
+                .open_sink_or_fallback()
         })
         .map_err(|e| AudioError::Output(e.to_string()))
 }
@@ -199,17 +199,17 @@ fn open_platform_output(
 /// standard format; AAudio converts it for the device.
 #[cfg(target_os = "android")]
 fn open_platform_output(
-    on_error: impl FnMut(rodio::cpal::StreamError) + Send + Clone + 'static,
-) -> Result<OutputStream, AudioError> {
+    on_error: impl FnMut(rodio::CpalError) + Send + Clone + 'static,
+) -> Result<MixerDeviceSink, AudioError> {
     use rodio::cpal::traits::HostTrait;
 
     let device = rodio::cpal::default_host()
         .default_output_device()
         .ok_or_else(|| AudioError::Output("no audio output device".into()))?;
-    OutputStreamBuilder::default()
+    DeviceSinkBuilder::default()
         .with_device(device)
-        .with_sample_rate(48_000)
-        .with_channels(2)
+        .with_sample_rate(rodio::nz!(48_000))
+        .with_channels(rodio::nz!(2))
         .with_error_callback(on_error)
         .open_stream()
         .map_err(|e| AudioError::Output(e.to_string()))
@@ -218,14 +218,14 @@ fn open_platform_output(
 /// State owned by the audio thread.
 struct Worker {
     /// None until an output could be opened.
-    output: Option<OutputStream>,
+    output: Option<MixerDeviceSink>,
     /// Set when the system stops the output stream.
     broken: Arc<AtomicBool>,
     /// What is loaded, to start it again on a new output.
     current: Option<Stream>,
     loopback: mpsc::Sender<Command>,
     on_event: Box<dyn Fn(AudioEvent) + Send>,
-    sink: Option<Sink>,
+    sink: Option<Player>,
     /// Bumped on every load or stop so stale background loads are ignored.
     generation: u64,
     state: PlaybackState,
@@ -236,7 +236,7 @@ struct Worker {
 
 impl Worker {
     fn new(
-        output: Option<OutputStream>,
+        output: Option<MixerDeviceSink>,
         broken: Arc<AtomicBool>,
         loopback: mpsc::Sender<Command>,
         on_event: Box<dyn Fn(AudioEvent) + Send>,
@@ -310,7 +310,7 @@ impl Worker {
                             self.set_state(PlaybackState::Stopped);
                             return;
                         };
-                        let sink = Sink::connect_new(&mixer);
+                        let sink = Player::connect_new(&mixer);
                         sink.set_volume(self.volume);
                         if !autoplay {
                             sink.pause();
@@ -342,7 +342,7 @@ impl Worker {
                 match result {
                     Ok(decoder) => {
                         let Some(mixer) = self.mixer() else { return };
-                        let sink = Sink::connect_new(&mixer);
+                        let sink = Player::connect_new(&mixer);
                         sink.set_volume(self.volume);
                         sink.append(decoder);
                         if let Err(e) = sink.try_seek(position) {
