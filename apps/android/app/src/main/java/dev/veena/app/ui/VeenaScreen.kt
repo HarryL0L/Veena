@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -146,8 +147,16 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
         },
     ) { padding ->
         // The mini player floats over the page, so songs scroll behind it;
-        // lists leave this much room at the end so nothing stays hidden.
-        val miniPlayerSpace = if (player.current != null) 104.dp else 0.dp
+        // lists and buttons leave this much room so nothing stays hidden.
+        // Its real height is measured (it changes with font size), with a
+        // guess until the first measurement.
+        val density = LocalDensity.current
+        var miniPlayerHeight by remember { mutableStateOf(0.dp) }
+        val miniPlayerSpace = when {
+            player.current == null -> 0.dp
+            miniPlayerHeight > 0.dp -> miniPlayerHeight + 8.dp
+            else -> 128.dp
+        }
         // Home's sky reaches up behind the status bar; other pages start below it.
         val below = Modifier.padding(top = padding.calculateTopPadding())
         Box(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
@@ -202,7 +211,9 @@ fun VeenaScreen(viewModel: PlayerViewModel) {
                     onNext = viewModel::next,
                     onPrevious = viewModel::previous,
                     onOpen = { expanded = true },
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .onSizeChanged { miniPlayerHeight = with(density) { it.height.toDp() } },
                 )
             }
         }
