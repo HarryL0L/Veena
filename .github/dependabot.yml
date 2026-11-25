@@ -9,6 +9,12 @@ updates:
       # One pull request for routine updates instead of one per crate.
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # rodio 0.22+ needs cpal 0.17+, whose Android output panics when no
+      # Java context is set up (always the case in Termux). Stay on 0.21
+      # until cpal handles that; tested on a phone with rodio 0.23: no sound.
+      - dependency-name: rodio
+        versions: [">=0.22"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
