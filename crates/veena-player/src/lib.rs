@@ -47,6 +47,8 @@ pub struct Snapshot {
     pub volume: f32,
     pub shuffle: bool,
     pub repeat: Repeat,
+    /// Playback pauses when the current track ends (a sleep timer).
+    pub pause_at_end: bool,
 }
 
 enum Message {
@@ -67,6 +69,7 @@ enum Message {
     SetVolume(f32),
     SetShuffle(bool),
     SetRepeat(Repeat),
+    SetPauseAtEnd(bool),
     Snapshot(oneshot::Sender<Snapshot>),
     Shutdown,
     // Internal
@@ -118,6 +121,7 @@ impl Player {
             resolving: false,
             awaiting_audio: false,
             autoplay: true,
+            pause_at_end: false,
             failures: 0,
             state: PlaybackState::Stopped,
             position: Duration::ZERO,
@@ -211,6 +215,12 @@ impl Player {
         self.send(Message::SetRepeat(repeat));
     }
 
+    /// Pause when the current track ends, as a sleep timer: the next track
+    /// is loaded but waits, paused. Also works with repeat-one.
+    pub fn set_pause_at_end(&self, on: bool) {
+        self.send(Message::SetPauseAtEnd(on));
+    }
+
     pub async fn snapshot(&self) -> Snapshot {
         let (tx, rx) = oneshot::channel();
         self.send(Message::Snapshot(tx));
@@ -245,6 +255,8 @@ struct Actor {
     awaiting_audio: bool,
     /// Whether the track being loaded should start playing.
     autoplay: bool,
+    /// Pause when the current track ends.
+    pause_at_end: bool,
     /// Consecutive tracks that failed to play, to avoid skipping forever.
     failures: usize,
     state: PlaybackState,
@@ -305,7 +317,7 @@ impl Actor {
             Message::TogglePause => match self.state {
                 PlaybackState::Playing => self.engine.pause(),
                 PlaybackState::Paused => self.engine.play(),
-                PlaybackState::Loading => self.autoplay = !self.autoplay,
+                PlaybackState::Loading => self.set_autoplay(!self.autoplay),
                 PlaybackState::Stopped => {
                     self.autoplay = true;
                     if self.queue.current().is_some() {
@@ -318,7 +330,7 @@ impl Actor {
             Message::Play => match self.state {
                 PlaybackState::Playing => {}
                 PlaybackState::Paused => self.engine.play(),
-                PlaybackState::Loading => self.autoplay = true,
+                PlaybackState::Loading => self.set_autoplay(true),
                 PlaybackState::Stopped => {
                     self.autoplay = true;
                     if self.queue.current().is_some() {
@@ -330,7 +342,7 @@ impl Actor {
             },
             Message::Pause => match self.state {
                 PlaybackState::Playing => self.engine.pause(),
-                PlaybackState::Loading => self.autoplay = false,
+                PlaybackState::Loading => self.set_autoplay(false),
                 PlaybackState::Paused | PlaybackState::Stopped => {}
             },
             Message::Stop => self.halt(),
@@ -364,6 +376,10 @@ impl Actor {
                 self.queue.set_repeat(repeat);
                 self.emit(PlayerEvent::QueueChanged);
             }
+            Message::SetPauseAtEnd(on) => {
+                self.pause_at_end = on;
+                self.emit(PlayerEvent::QueueChanged);
+            }
             Message::Snapshot(reply) => {
                 let _ = reply.send(Snapshot {
                     tracks: self.queue.tracks().to_vec(),
@@ -374,6 +390,7 @@ impl Actor {
                     volume: self.volume,
                     shuffle: self.queue.shuffle(),
                     repeat: self.queue.repeat(),
+                    pause_at_end: self.pause_at_end,
                 });
             }
             Message::Resolved { generation, result } => {
@@ -423,7 +440,14 @@ impl Actor {
                     duration: self.duration,
                 });
             }
-            AudioEvent::TrackEnded => self.advance(false),
+            AudioEvent::TrackEnded => {
+                if self.pause_at_end {
+                    // The sleep timer: the next track loads, paused.
+                    self.pause_at_end = false;
+                    self.autoplay = false;
+                }
+                self.advance(false);
+            }
             AudioEvent::Error(e) if self.awaiting_audio => {
                 self.awaiting_audio = false;
                 self.track_failed(e);
@@ -434,6 +458,20 @@ impl Actor {
 
     /// Move to the next track. At the end of the queue, automatic advances
     /// stop playback; a manual "next" is ignored.
+    /// Whether the track being loaded should play when ready. Once it has
+    /// been handed to the audio engine, the engine is told too, or a pause
+    /// in those moments would be lost.
+    fn set_autoplay(&mut self, play: bool) {
+        self.autoplay = play;
+        if self.awaiting_audio {
+            if play {
+                self.engine.play();
+            } else {
+                self.engine.pause();
+            }
+        }
+    }
+
     fn advance(&mut self, manual: bool) {
         if self.queue.next(manual).is_some() {
             self.start_current();

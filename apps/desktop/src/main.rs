@@ -142,8 +142,11 @@ pub(crate) struct Ui {
 /// When the sleep timer pauses playback.
 enum Sleep {
     At(Instant),
-    /// When the song with this key stops being the one playing.
-    EndOfSong(Option<String>),
+    /// When the current song ends; the player does this itself. `armed`
+    /// once the player has reported the request back.
+    EndOfSong {
+        armed: bool,
+    },
 }
 
 pub(crate) fn key(t: &TrackInfo) -> String {
@@ -288,6 +291,16 @@ impl Ui {
             return;
         };
         self.state = state;
+        // The player pauses at the end of the song by itself; the label
+        // goes when it reports that it has.
+        if let Some(Sleep::EndOfSong { armed }) = &mut self.sleep {
+            if self.state.pause_at_end {
+                *armed = true;
+            } else if *armed {
+                self.sleep = None;
+                self.show_sleep();
+            }
+        }
         self.heard_at = (self.state.position_ms, Instant::now());
         let shown = (
             self.state.queue.iter().map(key).collect::<Vec<_>>(),
@@ -326,14 +339,6 @@ impl Ui {
         if changed {
             self.lyrics = None;
             self.lyric_lines.set_vec(Vec::new());
-            if let Some(Sleep::EndOfSong(k)) = &self.sleep
-                && k.is_some()
-                && *k != self.playing_key
-            {
-                self.sleep = None;
-                background(&self.veena, |v| v.pause());
-                self.show_sleep();
-            }
             window.set_lyrics_note("Looking for lyrics…".into());
             if let Some(track) = current.clone() {
                 // Colours, history, lyrics and the offline list follow the song.
@@ -454,7 +459,7 @@ impl Ui {
         window.set_sleep_label(
             match &self.sleep {
                 None => String::new(),
-                Some(Sleep::EndOfSong(_)) => "End of song".into(),
+                Some(Sleep::EndOfSong { .. }) => "End of song".into(),
                 Some(Sleep::At(at)) => {
                     let left = at.saturating_duration_since(Instant::now()).as_secs();
                     format!("{}:{:02}", left / 60, left % 60)
@@ -565,11 +570,13 @@ fn connect(window: &AppWindow, ui: &Rc<RefCell<Ui>>) {
         with_ui(|ui| {
             ui.sleep = match minutes {
                 m if m < 0 => None,
-                0 => Some(Sleep::EndOfSong(ui.playing_key.clone())),
+                0 => Some(Sleep::EndOfSong { armed: false }),
                 m => Some(Sleep::At(
                     Instant::now() + Duration::from_secs(m as u64 * 60),
                 )),
             };
+            let end_of_song = minutes == 0;
+            background(&ui.veena, move |v| v.set_pause_at_end(end_of_song));
             ui.show_sleep();
         })
     });

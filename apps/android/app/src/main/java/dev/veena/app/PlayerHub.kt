@@ -13,7 +13,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import uniffi.veena_ffi.PlayState
 import uniffi.veena_ffi.PlayerListener
 import uniffi.veena_ffi.PlayerState
 import uniffi.veena_ffi.Veena
@@ -57,6 +56,7 @@ class PlayerHub(val veena: Veena) {
     fun setSleepTimer(minutes: Int?) {
         sleepJob?.cancel()
         if (minutes != null) {
+            send { setPauseAtEnd(false) }
             val endsAt = System.currentTimeMillis() + minutes * 60_000L
             _sleep.value = SleepTimer(endsAt = endsAt)
             sleepJob = scope.launch {
@@ -65,13 +65,13 @@ class PlayerHub(val veena: Veena) {
                 _sleep.value = null
             }
         } else {
-            val playing = state.value.current
+            // The player itself pauses when the song ends (also with
+            // repeat-one); the next song waits, loaded and paused.
             _sleep.value = SleepTimer(endsAt = null)
             sleepJob = scope.launch {
-                // The next song starts loading when this one ends; pausing
-                // then stops it before it makes a sound.
-                state.first { it.current != playing || it.state == PlayState.STOPPED }
-                veena.pause()
+                veena.setPauseAtEnd(true)
+                state.first { it.pauseAtEnd }
+                state.first { !it.pauseAtEnd }
                 _sleep.value = null
             }
         }
@@ -79,6 +79,7 @@ class PlayerHub(val veena: Veena) {
 
     fun cancelSleepTimer() {
         sleepJob?.cancel()
+        send { setPauseAtEnd(false) }
         _sleep.value = null
     }
 

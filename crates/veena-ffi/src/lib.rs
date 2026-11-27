@@ -79,6 +79,8 @@ pub struct PlayerState {
     pub volume: f32,
     pub shuffle: bool,
     pub repeat: RepeatMode,
+    /// A sleep timer is waiting for the current song to end.
+    pub pause_at_end: bool,
 }
 
 /// One line of lyrics; `time_ms` is when it is sung, for synced lyrics.
@@ -480,6 +482,12 @@ impl Veena {
         });
     }
 
+    /// Sleep timer: pause when the current song ends (also with repeat-one).
+    /// The next song is loaded, paused, ready to resume.
+    pub fn set_pause_at_end(&self, on: bool) {
+        self.player.set_pause_at_end(on);
+    }
+
     pub fn state(&self) -> PlayerState {
         let snapshot = self.runtime.block_on(self.player.snapshot());
         self.to_state(snapshot)
@@ -816,6 +824,7 @@ impl Veena {
                 Repeat::All => RepeatMode::All,
                 Repeat::One => RepeatMode::One,
             },
+            pause_at_end: snapshot.pause_at_end,
         }
     }
 }
@@ -1151,6 +1160,10 @@ mod tests {
                 let _ = std::fs::remove_dir_all(&dir);
                 return;
             };
+            // A report from just before `play` can still show an empty queue.
+            if state.queue.is_empty() {
+                continue;
+            }
             assert_eq!(state.queue, vec![track.clone()]);
             saw_playing |= state.state == PlayState::Playing;
             if saw_playing && state.state == PlayState::Stopped {
@@ -1159,5 +1172,137 @@ mod tests {
         }
         assert!(saw_playing, "playback started");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A test player: the player, its songs, its reports and its folder.
+    type TestPlayer = (
+        Arc<Veena>,
+        Vec<TrackInfo>,
+        mpsc::Receiver<Option<PlayerState>>,
+        PathBuf,
+    );
+
+    /// A player with `n` short songs on disk, or None without an audio output.
+    fn player_with_songs(name: &str, n: usize) -> Option<TestPlayer> {
+        let dir = std::env::temp_dir().join(format!("veena-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let veena = match Veena::new(
+            dir.to_string_lossy().into(),
+            dir.join("cache").to_string_lossy().into(),
+        ) {
+            Ok(veena) => veena,
+            Err(e) => {
+                eprintln!("skipping: {e}");
+                return None;
+            }
+        };
+        let tracks = (0..n)
+            .map(|i| {
+                let file = dir.join(format!("song{i}.wav"));
+                std::fs::write(&file, wav()).unwrap();
+                TrackInfo {
+                    kind: "file".into(),
+                    id: file.to_string_lossy().into(),
+                    title: format!("Song {i}"),
+                    artist: None,
+                    album: None,
+                    duration_ms: None,
+                    artwork: None,
+                    source: "Local files".into(),
+                }
+            })
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        veena
+            .clone()
+            .set_listener(Box::new(Collect(Mutex::new(tx))));
+        Some((veena, tracks, rx, dir))
+    }
+
+    /// The states until `done` matches, or None if there is no audio output.
+    fn wait_for(
+        rx: &mpsc::Receiver<Option<PlayerState>>,
+        mut seen: impl FnMut(&PlayerState),
+        done: impl Fn(&PlayerState) -> bool,
+    ) -> Option<PlayerState> {
+        loop {
+            let state = rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("player kept reporting")?;
+            seen(&state);
+            if done(&state) {
+                return Some(state);
+            }
+        }
+    }
+
+    #[test]
+    fn sleep_timer_pauses_at_the_end_of_the_song() {
+        let Some((veena, tracks, rx, dir)) = player_with_songs("sleep", 2) else {
+            return;
+        };
+        veena.set_pause_at_end(true);
+        veena.play(tracks, 0);
+        let mut second_played = false;
+        let Some(end) = wait_for(
+            &rx,
+            |s| second_played |= s.current == Some(1) && s.state == PlayState::Playing,
+            |s| s.current == Some(1) && s.state == PlayState::Paused,
+        ) else {
+            return eprintln!("skipping: no audio output");
+        };
+        assert!(!end.pause_at_end, "the timer is used up");
+        // Nothing more happens: the next song stays paused.
+        while let Ok(Some(s)) = rx.recv_timeout(Duration::from_millis(1500)) {
+            second_played |= s.state == PlayState::Playing;
+        }
+        assert!(!second_played, "the next song waited, paused");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sleep_timer_works_with_repeat_one() {
+        let Some((veena, tracks, rx, dir)) = player_with_songs("sleep-one", 1) else {
+            return;
+        };
+        veena.set_repeat(RepeatMode::One);
+        veena.set_pause_at_end(true);
+        veena.play(tracks, 0);
+        let played = std::cell::Cell::new(false);
+        if wait_for(
+            &rx,
+            |s| played.set(played.get() || s.state == PlayState::Playing),
+            |s| played.get() && s.state == PlayState::Paused,
+        )
+        .is_none()
+        {
+            return eprintln!("skipping: no audio output");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn pause_while_loading_is_not_lost() {
+        let Some((veena, tracks, rx, dir)) = player_with_songs("pause-loading", 1) else {
+            return;
+        };
+        veena.play(tracks, 0);
+        veena.pause();
+        let mut played = false;
+        if wait_for(
+            &rx,
+            |s| played |= s.state == PlayState::Playing,
+            |s| s.state == PlayState::Paused,
+        )
+        .is_none()
+        {
+            return eprintln!("skipping: no audio output");
+        }
+        while let Ok(Some(s)) = rx.recv_timeout(Duration::from_millis(1500)) {
+            played |= s.state == PlayState::Playing;
+        }
+        assert!(!played, "it never started playing");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

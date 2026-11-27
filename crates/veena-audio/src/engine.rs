@@ -46,7 +46,6 @@ enum Command {
     },
     Loaded {
         generation: u64,
-        autoplay: bool,
         result: Result<Decoder<Input>, AudioError>,
     },
     /// The current stream, opened again after the output was replaced.
@@ -228,6 +227,9 @@ struct Worker {
     sink: Option<Sink>,
     /// Bumped on every load or stop so stale background loads are ignored.
     generation: u64,
+    /// Whether the stream being opened should play once it is ready; play
+    /// and pause while it opens change this.
+    play_when_loaded: bool,
     state: PlaybackState,
     duration: Option<Duration>,
     volume: f32,
@@ -249,6 +251,7 @@ impl Worker {
             on_event,
             sink: None,
             generation: 0,
+            play_when_loaded: true,
             state: PlaybackState::Stopped,
             duration: None,
             volume: 1.0,
@@ -279,26 +282,20 @@ impl Worker {
             } => {
                 self.clear();
                 self.current = Some(stream.clone());
+                self.play_when_loaded = autoplay;
                 self.set_state(PlaybackState::Loading);
                 let generation = self.generation;
                 let loopback = self.loopback.clone();
                 thread::spawn(move || {
                     let result = decode::open(&stream, cache.map(|c| *c));
-                    let _ = loopback.send(Command::Loaded {
-                        generation,
-                        autoplay,
-                        result,
-                    });
+                    let _ = loopback.send(Command::Loaded { generation, result });
                 });
             }
-            Command::Loaded {
-                generation,
-                autoplay,
-                result,
-            } => {
+            Command::Loaded { generation, result } => {
                 if generation != self.generation {
                     return; // superseded by a newer load or a stop
                 }
+                let autoplay = self.play_when_loaded;
                 match result {
                     Ok(decoder) => {
                         self.duration = decoder.total_duration();
@@ -365,12 +362,17 @@ impl Worker {
                 if let Some(sink) = &self.sink {
                     sink.play();
                     self.set_state(PlaybackState::Playing);
+                } else if self.state == PlaybackState::Loading {
+                    self.play_when_loaded = true;
                 }
             }
             Command::Pause => {
                 if let Some(sink) = &self.sink {
                     sink.pause();
                     self.set_state(PlaybackState::Paused);
+                } else if self.state == PlaybackState::Loading {
+                    // Still opening: start paused when it is ready.
+                    self.play_when_loaded = false;
                 }
             }
             Command::Stop => {
@@ -490,5 +492,61 @@ impl Worker {
 
     fn emit(&self, event: AudioEvent) {
         (self.on_event)(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A second of silence as a WAV file.
+    fn wav(path: &std::path::Path) {
+        let (rate, samples) = (8000u32, 8000u32);
+        let mut out = b"RIFF".to_vec();
+        out.extend((36 + samples * 2).to_le_bytes());
+        out.extend(b"WAVEfmt ");
+        out.extend(16u32.to_le_bytes());
+        out.extend(1u16.to_le_bytes());
+        out.extend(1u16.to_le_bytes());
+        out.extend(rate.to_le_bytes());
+        out.extend((rate * 2).to_le_bytes());
+        out.extend(2u16.to_le_bytes());
+        out.extend(16u16.to_le_bytes());
+        out.extend(b"data");
+        out.extend((samples * 2).to_le_bytes());
+        out.extend(vec![0u8; samples as usize * 2]);
+        std::fs::write(path, out).unwrap();
+    }
+
+    /// Pausing while a stream is still opening must hold once it opens; the
+    /// sleep timer relies on this when it pauses as the next song loads.
+    #[test]
+    fn pause_while_opening_is_kept() {
+        let path = std::env::temp_dir().join(format!("veena-engine-{}.wav", std::process::id()));
+        wav(&path);
+        let (tx, rx) = mpsc::channel();
+        let engine = AudioEngine::new(move |e| {
+            let _ = tx.send(e);
+        })
+        .unwrap();
+        engine.load(Stream::file(&path), true, None);
+        engine.pause();
+        let mut states = Vec::new();
+        while let Ok(event) = rx.recv_timeout(Duration::from_millis(1500)) {
+            match event {
+                AudioEvent::StateChanged(s) => states.push(s),
+                AudioEvent::Error(e) if e.contains("no audio output") => {
+                    let _ = std::fs::remove_file(&path);
+                    return eprintln!("skipping: {e}");
+                }
+                _ => {}
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            !states.contains(&PlaybackState::Playing),
+            "it played anyway: {states:?}"
+        );
+        assert_eq!(states.last(), Some(&PlaybackState::Paused), "{states:?}");
     }
 }
