@@ -49,6 +49,7 @@ const BUNDLED: &[(&str, &str)] = &[
 const VIDEO_SOURCE: &str = "YouTube videos";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    name_sound_stream();
     let options = Options::parse();
     let data = dir("XDG_DATA_HOME", ".local/share");
     let cache = dir("XDG_CACHE_HOME", ".cache");
@@ -94,6 +95,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     window.run()?;
     Ok(())
+}
+
+/// Tell the desktop's sound server who is playing, so its volume controls
+/// list "Veena Music" with its icon (not "ALSA plug-in [veena-desktop]").
+/// PulseAudio and PipeWire read these from the environment when the sound
+/// output opens. A value the user set is left alone.
+fn name_sound_stream() {
+    let props = [
+        // OVERRIDE: the ALSA-to-PulseAudio bridge (Termux, many distros)
+        // sets its own "ALSA plug-in [...]" name, which plain PULSE_PROP
+        // cannot replace.
+        (
+            "PULSE_PROP_OVERRIDE",
+            "application.name='Veena Music' application.icon_name=veena-music media.role=music",
+        ),
+        (
+            "PIPEWIRE_PROPS",
+            "{ application.name = \"Veena Music\" application.icon-name = veena-music media.role = Music }",
+        ),
+    ];
+    for (key, value) in props {
+        if std::env::var_os(key).is_none() {
+            // SAFETY: called first thing in main, before any other thread
+            // exists, so nothing can read the environment concurrently.
+            unsafe { std::env::set_var(key, value) };
+        }
+    }
 }
 
 // ---------------------------------------------------------------- State
